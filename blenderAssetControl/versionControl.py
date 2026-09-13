@@ -5,7 +5,10 @@ import json
 
 from . import uuids, hashing
 
-repoDir = Path(r"C:\Users\User\Desktop\BlenderScriptLibrary\addons\blenderAssetControl\repo")
+def getRepoDir():
+    repoDir = bpy.context.preferences.addons[__package__].preferences.remoteDir
+    print(repoDir)
+    return Path(repoDir)
 
 def getDatablocks(collection, include_nested=True):
     # Return a set of all datablocks that are children/dependencies
@@ -115,6 +118,7 @@ def hashDatablocks(datablocks):
 
 def push(collection):
     # Names and paths
+    repoDir = getRepoDir()
     assetName = collection.name
     assetBlend = str(repoDir / f"{assetName}.blend")
     assetManifest = str(repoDir / f"{assetName}.json")
@@ -132,6 +136,7 @@ def push(collection):
 
 def pull(collection,datablocks):
     # Names and paths
+    repoDir = getRepoDir()
     assetName = collection.name
     assetBlend = repoDir / f"{assetName}.blend"
     assetManifest = repoDir / f"{assetName}.json"
@@ -146,6 +151,7 @@ def pull(collection,datablocks):
 
 def diff(collection):
     # Names and paths
+    repoDir = getRepoDir()
     assetName = collection.name
     assetBlend = repoDir / f"{assetName}.blend"
     assetManifest = repoDir / f"{assetName}.json"
