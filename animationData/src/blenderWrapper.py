@@ -102,6 +102,7 @@ def getHeader(context,options,numCurves,numObjs):
 def getAnimatedProps(objList):
     fcurves = []
     objects = []
+    keyedPaths = {}
 
     for obj in objList:
         hasObjAnim  = obj.animation_data and obj.animation_data.action
@@ -121,7 +122,13 @@ def getAnimatedProps(objList):
             for bName, fcs in boneFcs.items():
                 start = len(fcurves) # Index before extension
                 fcurves.extend(fcs)
-                objects.append((f"{obj.name}:{bName}","BONE",list(range(start,start + len(fcs)))))
+                objects.append((f"{obj.name}:{bName}","BONE",start,len(fcs))) # Store start and end indicies
+
+                # Add to keyedPaths
+                key = f"{obj.name}:{bName}"
+                paths = keyedPaths.setdefault(key,{})
+                for fc in fcs:
+                    paths.setdefault(fc.data_path,set()).add(fc.array_index)
         
         else:
             # Object-level curves
@@ -131,7 +138,12 @@ def getAnimatedProps(objList):
                 if objFcs:
                     start = len(fcurves)
                     fcurves.extend(objFcs)
-                    objects.append((obj.name, obj.type, list(range(start, len(fcurves)))))
+                    objects.append((obj.name, obj.type, start, len(fcurves) - start))
+
+                    # Add to keyedPaths
+                    paths = keyedPaths.setdefault(obj.name,{})
+                    for fc in objFcs:
+                        paths.setdefault(fc.data_path,set()).add(fc.array_index)
 
             # Data-block curves (e.g. camera lens, light energy)
             if hasDataAnim:
@@ -140,15 +152,44 @@ def getAnimatedProps(objList):
                 if dataFcs:
                     start = len(fcurves)
                     fcurves.extend(dataFcs)
-                    objects.append((obj.name, "OBJDATA", list(range(start, len(fcurves)))))
+                    objects.append((obj.name, "OBJDATA", start, len(fcurves) - start))
+                    
+                    # Add to keyedPaths
+                    key = f"{obj.name}:DATA"
+                    paths = keyedPaths.setdefault(key,{})
+                    for fc in dataFcs:
+                        paths.setdefault(fc.data_path,set()).add(fc.array_index)
 
-    return fcurves,objects
+    return fcurves,objects,keyedPaths
+
+def getStaticProps(objs,fcurves,objects,keyedPaths):
+    print(keyedPaths)
+    for obj in objs:
+        animatedObjProps = keyedPaths.get(obj.name,set())
+        animatedDataProps = keyedPaths.get(f"{obj.name}:DATA",set())
+
+        for prop in obj.bl_rna.properties:
+            try:
+                val = getattr(obj, prop.identifier)
+                
+                print(prop.identifier)
+                if prop.is_array:
+                    print("ARRAY FOUND HERE!!!")
+                    for i,v in enumerate(val):
+                        print(f"{i}{v}")
+            
+            except Exception as e:
+                print(f"Error: {e}")
+            print()
+
+    return fcurves, objects
 
 # Callable \/
 def exportAdb(context,objList,filepath,options):
     print("Exporting adb file...")
     
-    fcurves,objects = getAnimatedProps(objList)
+    fcurves,objects,keyedPaths = getAnimatedProps(objList)
+    fcurves,objects = getStaticProps(objList,fcurves,objects,keyedPaths)
 
     fcurveAmount = len(fcurves)
     objAmount = len(objects)
@@ -168,11 +209,10 @@ def exportAdb(context,objList,filepath,options):
             buf += keyData
         
         # Object Blocks
-        for name,objType,curveIds in objects:
+        for name,objType,curveStart, curveCount in objects:
             nameBytes = name.encode('utf-8')
             typeEnum = objTypeEnum.get(objType,255)
-            startCurvesId = curveIds[0] if curveIds else 0
-            buf += struct.pack('<BHHH',typeEnum,startCurvesId,len(curveIds),len(nameBytes)) # Curve Ids stored as startIndex + count
+            buf += struct.pack('<BHHH',typeEnum,curveStart,curveCount,len(nameBytes)) # Curve Ids stored as startIndex + count
             buf += nameBytes
 
         f.write(header)

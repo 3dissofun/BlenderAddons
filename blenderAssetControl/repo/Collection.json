@@ -1,0 +1,47 @@
+{
+    "b1d000ed-4a8f-4ec8-9c9f-28d68175abd6": {
+        "hash": "",
+        "name": "Material",
+        "type": "Material"
+    },
+    "21489d5f-317a-49a4-a36a-957f4a4575b0": {
+        "hash": "",
+        "name": "Cube",
+        "type": "Object"
+    },
+    "04004747-fbf8-41cf-ba33-6b7f648cc2ae": {
+        "hash": "",
+        "name": "Light",
+        "type": "PointLight"
+    },
+    "688ef7a5-0a83-4919-a4f6-a9e12a4c29ca": {
+        "hash": "",
+        "name": "Collection",
+        "type": "Collection"
+    },
+    "6d36b824-205f-41d2-bda5-203f5ebfd6a9": {
+        "hash": "",
+        "name": "Cube",
+        "type": "Mesh"
+    },
+    "5c69ff66-cf16-420f-a7a2-2593ba3e7cdb": {
+        "hash": "",
+        "name": "Light",
+        "type": "Object"
+    },
+    "43641fdb-0a55-488d-b448-e8e833285b86": {
+        "hash": "",
+        "name": "Camera",
+        "type": "Object"
+    },
+    "b9fe394c-fbde-4994-b951-a85977716b54": {
+        "hash": "",
+        "name": "Shader Nodetree",
+        "type": "ShaderNodeTree"
+    },
+    "93a27736-7fda-4010-acbf-cd288a554ace": {
+        "hash": "",
+        "name": "Camera",
+        "type": "Camera"
+    }
+}
