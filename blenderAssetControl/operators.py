@@ -50,10 +50,14 @@ class AC_OT_Diff(bpy.types.Operator):
             return {'CANCELLED'}
 
         results = versionControl.diff(coll)
+        coll.ac_datablock_status.clear()
         for k,v in results.items():
             if v:
                 for i in v:
                     print(f"{k}:{i}")
+                    entry = coll.ac_datablock_status.add()
+                    entry.name = i
+                    entry.status = k
 
 
         return {'FINISHED'}
