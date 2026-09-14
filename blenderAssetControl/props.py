@@ -13,18 +13,29 @@ class AC_PG_DatablockStatus(bpy.types.PropertyGroup):
     name: bpy.props.StringProperty()
     status: bpy.props.StringProperty()
 
+class AC_PG_AvailableAsset(bpy.types.PropertyGroup):
+    name: bpy.props.StringProperty()
+    filepath: bpy.props.StringProperty()
+
 def register():
     bpy.utils.register_class(AC_AP_Preferences)
     bpy.utils.register_class(AC_PG_DatablockStatus)
+    bpy.utils.register_class(AC_PG_AvailableAsset)
     if not hasattr(bpy.types.ID,"uuid"):
         bpy.types.ID.uuid = bpy.props.StringProperty(name="UUID",description="Stable unique identifier for block tracking",default="",)
     if not hasattr(bpy.types.ID,"last_hash"):
         bpy.types.ID.last_hash = bpy.props.StringProperty(name="LastHash",description="Last computed hash for datablock",default="",)
 
+    # For diff tracking
     bpy.types.Collection.ac_datablock_status = bpy.props.CollectionProperty(type=AC_PG_DatablockStatus)
     bpy.types.Collection.ac_datablock_index = bpy.props.IntProperty()
 
+    # For asset import
+    bpy.types.Scene.ac_available_assets = bpy.props.CollectionProperty(type=AC_PG_AvailableAsset)
+    bpy.types.Scene.ac_available_asset_index = bpy.props.IntProperty(default=0)
+
 def unregister():
+    bpy.utils.unregister_class(AC_PG_AvailableAsset)
     bpy.utils.unregister_class(AC_PG_DatablockStatus)
     bpy.utils.unregister_class(AC_AP_Preferences)
     # NOTE[Josh] I do not delete the uuid or last_hash props incase the addon is registered they should

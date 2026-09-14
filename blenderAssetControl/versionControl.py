@@ -4,11 +4,7 @@ from pathlib import Path
 import json
 
 from . import uuids, hashing
-
-def getRepoDir():
-    repoDir = bpy.context.preferences.addons[__package__].preferences.remoteDir
-    print(repoDir)
-    return Path(repoDir)
+from .utils import getRepoDir
 
 def getDatablocks(collection, include_nested=True):
     # Return a set of all datablocks that are children/dependencies

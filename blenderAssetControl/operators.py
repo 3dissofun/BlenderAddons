@@ -1,6 +1,9 @@
 import bpy
 
+import os
+
 from . import versionControl
+from .utils import getRepoDir
 
 class AC_OT_Push(bpy.types.Operator):
     bl_idname = "op.push"
@@ -50,15 +53,17 @@ class AC_OT_Diff(bpy.types.Operator):
             return {'CANCELLED'}
 
         results = versionControl.diff(coll)
-        coll.ac_datablock_status.clear()
-        for k,v in results.items():
-            if v:
-                for i in v:
-                    print(f"{k}:{i}")
-                    entry = coll.ac_datablock_status.add()
-                    entry.name = i
-                    entry.status = k
+        if not results:
+            return {'CANCELLED'}
 
+        coll.ac_datablock_status.clear()
+        for status,items in results.items():
+            if items:
+                for datablock in items:
+                    print(f"{status}:{datablock}")
+                    entry = coll.ac_datablock_status.add()
+                    entry.name = datablock
+                    entry.status = status
 
         return {'FINISHED'}
 
@@ -77,7 +82,67 @@ class AC_OT_Pull(bpy.types.Operator):
 
         return {'FINISHED'}
 
-classes = (AC_OT_Commit, AC_OT_Diff, AC_OT_Push, AC_OT_Pull)
+class AC_OT_FindAssets(bpy.types.Operator):
+    bl_idname = "op.find_assets"
+    bl_label = "Find assets in repository"
+
+    def execute(self, context):
+        scene = context.scene
+        repoDir = getRepoDir()
+        scene.ac_available_assets.clear()
+
+        if not repoDir:
+            self.report({'WARNING'}, "Directory not found")
+            return {'FINISHED'}
+
+        for f in repoDir.iterdir():
+            if f.is_file() and f.suffix.lower() == '.blend':
+                item = scene.ac_available_assets.add()
+                item.name = f.stem
+                item.filepath = str(f)
+
+        return {'FINISHED'}
+
+class AC_OT_ImportAsset(bpy.types.Operator):
+    bl_idname = "op.import_asset"
+    bl_label = "Import Asset"
+    bl_description = "Import the selected asset"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        scene = context.scene
+        assets = scene.ac_available_assets
+        index = scene.ac_available_asset_index
+
+        if index < 0 or index >= len(assets):
+            self.report({'WARNING'}, "No asset selected")
+            return {'CANCELLED'}
+
+        item = assets[index]
+        filepath = item.filepath
+        collName = os.path.splitext(os.path.basename(filepath))[0]
+
+        if not os.path.isfile(filepath):
+            self.report({'WARNING'}, f"File not found: {filepath}")
+            return {'CANCELLED'}
+
+        with bpy.data.libraries.load(filepath) as (data_from, data_to):
+            if collName not in data_from.collections:
+                self.report({'WARNING'}, f"No collection named '{collName}' in {filepath}")
+                return {'CANCELLED'}
+            data_to.collections = [collName]
+
+        appendedColl = data_to.collections[0]
+
+        if appendedColl is None:
+            self.report({'ERROR'}, "Failed to append collection")
+            return {'CANCELLED'}
+
+        context.scene.collection.children.link(appendedColl)
+        self.report({'INFO'}, f"Imported collection '{collName}'")
+        return {'FINISHED'}
+
+classes = (AC_OT_Commit, AC_OT_Diff, AC_OT_Push, AC_OT_Pull, AC_OT_FindAssets, AC_OT_ImportAsset)
 
 def register():
     for c in classes:

@@ -1,5 +1,6 @@
 import bpy
-from bpy.props import StringProperty, EnumProperty, BoolProperty, CollectionProperty, IntProperty, PointerProperty
+
+panelName = "Asset Control"
 
 class AC_UL_DiffList(bpy.types.UIList):
     bl_idname = "AC_UL_DiffList"
@@ -30,8 +31,30 @@ class AC_PT_AssetControl(bpy.types.Panel):
         layout.operator("op.commit")
         layout.operator("op.diff")
         layout.template_list("AC_UL_DiffList", "", coll, "ac_datablock_status", coll, "ac_datablock_index")
-        
-classes = (AC_UL_DiffList,AC_PT_AssetControl,)
+
+class AC_UL_AvailableAssets(bpy.types.UIList):
+    def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
+        layout.label(text=item.name, icon='FILE_BLEND')
+
+class AC_PT_Import(bpy.types.Panel):
+    bl_idname = "AC_PT_import"
+    bl_label = "Import"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = panelName
+
+    def draw(self,context):
+        scene = context.scene
+        layout = self.layout
+        layout.operator("op.find_assets", icon='FILE_REFRESH')
+        layout.template_list(
+            "AC_UL_AvailableAssets", "",
+            scene, "ac_available_assets",
+            scene, "ac_available_asset_index"
+        )
+        layout.operator("op.import_asset",text="Import", icon='IMPORT')
+
+classes = (AC_UL_AvailableAssets,AC_UL_DiffList,AC_PT_AssetControl,AC_PT_Import)
 
 def register():
     for c in classes:
