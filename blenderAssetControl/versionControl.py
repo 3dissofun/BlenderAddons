@@ -2,9 +2,10 @@ import bpy
 
 from pathlib import Path
 import json
+import time
 
 from . import uuids, hashing
-from .utils import getRepoDir
+from .utils import getRepoDir, getLocalDir
 
 def getDatablocks(collection, include_nested=True):
     # Return a set of all datablocks that are children/dependencies
@@ -111,6 +112,34 @@ def hashDatablocks(datablocks):
         assetData[db.uuid] = {"hash":hashRes,"name":db.name,"type":type(db).__name__}
         db.last_hash = hashRes
     return assetData
+
+def commit(collection):
+    # Commit writes a local history
+    # NOTE[Josh] TO avoid future conflicts a commit lock should be made with user ids
+    assetName = collection.name
+    localDir = getLocalDir(assetName)
+    commitDir = localDir / "commits"
+    commitDir.mkdir(parents=True,exist_ok=True)
+    headFile = commitDir / "head"
+    if headFile.exists():
+        currentHeader = int(headFile.read_text(encoding="utf-8").strip()) + 1
+    else:
+        currentHeader = 1
+
+    datablocks = getDatablocks(collection)
+    uuids.ensureUuids(datablocks)
+    assetData = hashDatablocks(datablocks)
+    
+    blendCommitFile = commitDir / f"{currentHeader}.blend"
+    manifestCommitFile = commitDir / f"{currentHeader}.json"
+
+    bpy.data.libraries.write(str(blendCommitFile), datablocks, fake_user=True)
+    with open(manifestCommitFile, "w", encoding="utf-8") as f:
+        json.dump({"timestamp": time.time(),"assetData": assetData}, f, indent=4)
+
+    # Update header
+    headFile.write_text(str(currentHeader), encoding="utf-8")
+    return currentHeader
 
 def push(collection):
     # Names and paths

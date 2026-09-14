@@ -28,14 +28,18 @@ class AC_OT_Commit(bpy.types.Operator):
     bl_options = {'REGISTER'}
 
     def execute(self,context):
-        self.report({'INFO'},"Commiting...")
         
         coll = context.collection
         if not coll:
             self.report({'ERROR'},"No collection found to commit")
             return {'CANCELLED'}
 
-        #versionControl.commit(coll)
+        if not bpy.data.is_saved:
+            self.report({'ERROR'},"Save the file before commiting")
+            return {'CANCELLED'}
+            
+        commitVersion = versionControl.commit(coll)
+        self.report({'INFO'},f"Commited version {commitVersion}")
 
         return {'FINISHED'}
 
