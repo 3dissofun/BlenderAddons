@@ -142,7 +142,37 @@ class AC_OT_ImportAsset(bpy.types.Operator):
         self.report({'INFO'}, f"Imported collection '{collName}'")
         return {'FINISHED'}
 
-classes = (AC_OT_Commit, AC_OT_Diff, AC_OT_Push, AC_OT_Pull, AC_OT_FindAssets, AC_OT_ImportAsset)
+class AC_OT_RemoveAsset(bpy.types.Operator):
+    bl_idname = "op.remove_asset"
+    bl_label = "Remove Asset"
+    bl_description = "Remove the selected asset"
+    bl_options = {'REGISTER','UNDO'}
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_confirm(self, event)
+
+    def execute(self,context):
+        coll = context.collection
+
+        if not coll:
+            self.report({'ERROR'},"Collection not given")
+            return {'CANCELLED'}
+
+        if coll == context.scene.collection:
+            self.report({'ERROR'}, "Can't remove the scene's master collection")
+            return {'CANCELLED'}
+
+        name = str(coll.name)
+
+        for o in list(coll.all_objects):
+            bpy.data.objects.remove(o,do_unlink=True)
+
+        bpy.data.collections.remove(coll,do_unlink=True)
+
+        self.report({'INFO'},f"Removed Collection: '{name}' and all objects")
+        return {'FINISHED'}
+
+classes = (AC_OT_Commit, AC_OT_Diff, AC_OT_Push, AC_OT_Pull, AC_OT_FindAssets, AC_OT_ImportAsset, AC_OT_RemoveAsset)
 
 def register():
     for c in classes:
