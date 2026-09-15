@@ -29,6 +29,7 @@ class AC_PT_AssetControl(bpy.types.Panel):
         layout = self.layout
         coll = context.collection
         layout.operator("op.remove_asset",text="Delete Collection")
+        layout.prop(coll,"ac_commit_message")
         layout.operator("op.commit")
         layout.operator("op.diff")
         layout.template_list("AC_UL_DiffList", "", coll, "ac_datablock_status", coll, "ac_datablock_index")

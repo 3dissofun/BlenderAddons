@@ -11,109 +11,145 @@ def getDatablocks(collection, include_nested=True):
     # Return a set of all datablocks that are children/dependencies
     # of a given collection (objects, object data, materials, 
     # textures, node trees, actions, nested collections, etc).
-    found = set()
-
-    def add(db):
-        if db is not None and db not in found:
-            found.add(db)
-            return True
-        return False
-
-    def walk_material(mat):
-        if not add(mat):
-            return
-        if mat.node_tree:
-            walk_node_tree(mat.node_tree)
-        if mat.animation_data and mat.animation_data.action:
-            add(mat.animation_data.action)
+    result = {
+        'objects':     set(),
+        'meshes':      set(),
+        'materials':   set(),
+        'images':      set(),
+        'node_groups': set(),
+        'armatures':   set(),
+        'actions':     set(),
+    }
 
     def walk_node_tree(node_tree):
-        if not add(node_tree):
+        if node_tree is None or node_tree in result['node_groups']:
             return
+        result['node_groups'].add(node_tree)
         for node in node_tree.nodes:
-            # Image textures
+            if hasattr(node, "node_tree") and node.node_tree:
+                walk_node_tree(node.node_tree)  # nested groups
             if hasattr(node, "image") and node.image:
-                add(node.image)
-            # Nested node groups
-            if node.type == 'GROUP' and node.node_tree:
-                walk_node_tree(node.node_tree)
+                result['images'].add(node.image)
 
-    def walk_object(obj):
-        if not add(obj):
+    def walk_material(mat):
+        if mat is None:
             return
+        result['materials'].add(mat)
+        if mat.node_tree:
+            walk_node_tree(mat.node_tree)
 
-        # Object data (mesh, curve, armature, light, camera, etc.)
-        if obj.data:
-            add(obj.data)
+    def walk_action(action):
+        if action is not None:
+            result['actions'].add(action)
 
-        # Materials on the object itself and on its data
+    for obj in collection.all_objects:
+        result['objects'].add(obj)
+
+        # mesh data
+        if obj.type == 'MESH' and obj.data:
+            result['meshes'].add(obj.data)
+
+        # armature data (the datablock, distinct from the Object)
+        if obj.type == 'ARMATURE' and obj.data:
+            result['armatures'].add(obj.data)
+
+        # materials (+ their node trees/images)
         for slot in obj.material_slots:
             if slot.material:
                 walk_material(slot.material)
 
-        # Mesh-linked materials (in case slots miss any)
-        if obj.type == 'MESH' and obj.data:
-            for mat in obj.data.materials:
-                if mat:
-                    walk_material(mat)
+        # object-level animation action
+        if obj.animation_data:
+            walk_action(obj.animation_data.action)
 
-        # Armature data
-        if obj.type == 'ARMATURE' and obj.data:
-            add(obj.data)
+        # mesh/shape-key or other data-level animation (e.g. shape key actions)
+        if obj.data and getattr(obj.data, "animation_data", None):
+            walk_action(obj.data.animation_data.action)
 
-        # Modifiers referencing other datablocks
+        # geometry nodes modifiers reference node_groups directly
         for mod in obj.modifiers:
-            for attr in ("object", "object_from", "object_to", "target",
-                         "node_group", "collection"):
-                sub = getattr(mod, attr, None)
-                if sub is None:
-                    continue
-                if isinstance(sub, bpy.types.Object):
-                    walk_object(sub)
-                elif isinstance(sub, bpy.types.Collection):
-                    walk_collection(sub)
-                elif isinstance(sub, bpy.types.NodeTree):
-                    walk_node_tree(sub)
-                else:
-                    add(sub)
+            if hasattr(mod, "node_group") and mod.node_group:
+                walk_node_tree(mod.node_group)
 
-        # Particle systems -> instance objects/collections
-        for psys in obj.particle_systems:
-            settings = psys.settings
-            if settings:
-                add(settings)
-                if settings.instance_object:
-                    walk_object(settings.instance_object)
-                if settings.instance_collection:
-                    walk_collection(settings.instance_collection)
+    return result
 
-        # Animation
-        if obj.animation_data and obj.animation_data.action:
-            add(obj.animation_data.action)
-
-        # Object-level custom node groups (geometry nodes etc. covered by modifiers above)
-
-    def walk_collection(coll):
-        if not add(coll):
-            return
-        for obj in coll.objects:
-            walk_object(obj)
-        if include_nested:
-            for child in coll.children:
-                walk_collection(child)
-
-    walk_collection(collection)
-    return found
+def flattenDatablocks(datablocks):
+    # Returns a set of datablocks for an input dict of categorized datablocks
+    flat = set()
+    for dbType,dbSet in datablocks.items():
+        for db in dbSet:
+            flat.add(db)
+    return flat
 
 def hashDatablocks(datablocks):
     assetData = {}
-    for db in datablocks:
-        hashRes = hashing.hashBlock(db)
-        assetData[db.uuid] = {"hash":hashRes,"name":db.name,"type":type(db).__name__}
-        db.last_hash = hashRes
+    for dbType,dbSet in datablocks.items():
+        for db in dbSet:
+            hashRes = hashing.hashBlock(db,dbType)
+            assetData[db.uuid] = {"hash":hashRes,"name":db.name,"type":dbType}
+            db.last_hash = hashRes
     return assetData
 
-def commit(collection):
+def diff(collection, assetData=None):
+    # Diff against local commit file, optional assetData input to avoid recomputing it
+    # Names and paths
+    repoDir = getRepoDir()
+    assetName = collection.name
+    localDir = getLocalDir(assetName)
+    commitDir = localDir / "commits"
+    headFile = commitDir / "head"
+
+    if not headFile.exists():
+        print(f"VERSION CONTROL: ERROR, Local head file '{str(headFile)}' not found!")
+        return
+
+    header = int(headFile.read_text(encoding="utf-8").strip())
+    assetManifest = commitDir / f"{header}.json"
+
+    if not assetManifest.exists():
+        print(f"VERSION CONTROL: ERROR, Local asset manifest '{str(assetManifest)}' not found!")
+        return
+
+    if assetData is None:
+        datablocks = getDatablocks(collection)
+        flatDatablocks = flattenDatablocks(datablocks)
+        uuids.ensureUuids(flatDatablocks)
+        assetData = hashDatablocks(datablocks)
+
+    with open(str(assetManifest),"r",encoding="utf-8") as f:
+        manifestData = json.load(f)["assetData"]
+
+    added = set() 
+    removed = set()
+    modified = set()
+    unchanged = set()
+
+    for localUuid in assetData.keys():
+        if localUuid not in manifestData.keys():
+            added.add(assetData[localUuid]["name"])
+
+    for manifestUuid, data in manifestData.items():
+        manifestHash = data["hash"]
+        manifestName = data["name"]
+
+        if manifestUuid not in assetData.keys():
+            removed.add(manifestName)
+            continue
+        else:
+            # Check for diffs
+            localHash = assetData[manifestUuid]["hash"]
+            if localHash != manifestHash:
+                modified.add(manifestName)
+                continue
+            else:
+                # Unchanged
+                unchanged.add(manifestName)
+                continue
+
+    results = {"added":added,"removed":removed,"modified":modified,"unchanged":unchanged}
+    return results
+
+def commit(collection,message=""):
     # Commit writes a local history
     # NOTE[Josh] TO avoid future conflicts a commit lock should be made with user ids
     assetName = collection.name
@@ -122,20 +158,27 @@ def commit(collection):
     commitDir.mkdir(parents=True,exist_ok=True)
     headFile = commitDir / "head"
     if headFile.exists():
-        currentHeader = int(headFile.read_text(encoding="utf-8").strip()) + 1
+        oldHeader = int(headFile.read_text(encoding="utf-8").strip())
+        currentHeader = oldHeader + 1
     else:
         currentHeader = 1
 
     datablocks = getDatablocks(collection)
-    uuids.ensureUuids(datablocks)
+    flatDatablocks = flattenDatablocks(datablocks)
+    uuids.ensureUuids(flatDatablocks)
     assetData = hashDatablocks(datablocks)
+
+    diffResult = diff(collection, assetData=assetData)
+    if not (diffResult["added"] or diffResult["removed"] or diffResult["modified"]):
+        print("VERSION CONTROL: Nothing to commit, no changes since last commit")
+        return None
     
     blendCommitFile = commitDir / f"{currentHeader}.blend"
     manifestCommitFile = commitDir / f"{currentHeader}.json"
 
-    bpy.data.libraries.write(str(blendCommitFile), datablocks, fake_user=True)
+    bpy.data.libraries.write(str(blendCommitFile), flatDatablocks, fake_user=True)
     with open(manifestCommitFile, "w", encoding="utf-8") as f:
-        json.dump({"timestamp": time.time(),"assetData": assetData}, f, indent=4)
+        json.dump({"timestamp": time.time(),"message":message,"assetData": assetData}, f, indent=4)
 
     # Update header
     headFile.write_text(str(currentHeader), encoding="utf-8")
@@ -174,57 +217,3 @@ def pull(collection,datablocks):
         print(f"VERSION CONTROL: ERROR, Asset Manifest '{assetManifest}' not found in repository!")
         return
 
-def diff(collection):
-    # Names and paths
-    repoDir = getRepoDir()
-    assetName = collection.name
-    assetBlend = repoDir / f"{assetName}.blend"
-    assetManifest = repoDir / f"{assetName}.json"
-
-    if not assetBlend.exists():
-        print(f"VERSION CONTROL: ERROR, Asset '{assetBlend}' not found in repository!")
-        return
-
-    if not assetManifest.exists():
-        print(f"VERSION CONTROL: ERROR, Asset Manifest '{assetManifest}' not found in repository!")
-        return
-
-    assetBlend = str(assetBlend)
-    assetManifest = str(assetManifest)
-
-    datablocks = getDatablocks(collection)
-    uuids.ensureUuids(datablocks)
-    assetData = hashDatablocks(datablocks)
-
-    with open(assetManifest,"r",encoding="utf-8") as f:
-        manifestData = json.load(f)
-
-    added = set() 
-    removed = set()
-    modified = set()
-    unchanged = set()
-
-    for localUuid in assetData.keys():
-        if localUuid not in manifestData.keys():
-            added.add(assetData[localUuid]["name"])
-
-    for manifestUuid, data in manifestData.items():
-        manifestHash = data["hash"]
-        manifestName = data["name"]
-
-        if manifestUuid not in assetData.keys():
-            removed.add(manifestName)
-            continue
-        else:
-            # Check for diffs
-            localHash = assetData[manifestUuid]["hash"]
-            if localHash != manifestHash:
-                modified.add(manifestName)
-                continue
-            else:
-                # Unchanged
-                unchanged.add(manifestName)
-                continue
-
-    results = {"added":added,"removed":removed,"modified":modified,"unchanged":unchanged}
-    return results

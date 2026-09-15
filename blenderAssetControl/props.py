@@ -34,9 +34,18 @@ def register():
     bpy.types.Scene.ac_available_assets = bpy.props.CollectionProperty(type=AC_PG_AvailableAsset)
     bpy.types.Scene.ac_available_asset_index = bpy.props.IntProperty(default=0)
 
+    # For commits
+    bpy.types.Collection.ac_commit_message = bpy.props.StringProperty(
+        name="Commit Message",
+        description="Message describing the changes in this commit",
+        default="",
+    )
+
 def unregister():
     bpy.utils.unregister_class(AC_PG_AvailableAsset)
     bpy.utils.unregister_class(AC_PG_DatablockStatus)
     bpy.utils.unregister_class(AC_AP_Preferences)
+
+    del bpy.types.Collection.ac_commit_message
     # NOTE[Josh] I do not delete the uuid or last_hash props incase the addon is registered they should
     # stay consistent

@@ -34,6 +34,18 @@ def hashObject(block):
 
     return ""
 
+def hashImage(block):
+
+    return ""
+
+def hashNodeGroup(block):
+
+    return ""
+
+def hashArmature(block):
+
+    return ""
+
 # Sub Hashers
 
 def hashTransform(block):
@@ -43,15 +55,17 @@ def hashTransform(block):
 # Entry Point
 
 blockHashes = {
-        "Mesh": hashMesh,
-        "Material": hashMaterial,
-        "Action": hashAction,
-        "Object": hashObject,
+        "objects": hashObject,
+        "meshes": hashMesh,
+        "materials": hashMaterial,
+        "images": hashImage,
+        "node_groups": hashNodeGroup,
+        "armatures": hashArmature,
+        "actions": hashAction,
         }
 
 
-def hashBlock(block):
-    blockType = type(block).__name__
+def hashBlock(block,blockType):
     hasher = blockHashes.get(blockType)
     if hasher is None:
         print(f"HASHER: WARNING, No registered hash function for type {blockType}")

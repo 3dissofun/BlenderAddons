@@ -37,10 +37,16 @@ class AC_OT_Commit(bpy.types.Operator):
         if not bpy.data.is_saved:
             self.report({'ERROR'},"Save the file before commiting")
             return {'CANCELLED'}
-            
-        commitVersion = versionControl.commit(coll)
-        self.report({'INFO'},f"Commited version {commitVersion}")
 
+        message = coll.ac_commit_message.strip()
+            
+        commitVersion = versionControl.commit(coll,message=message)
+        if commitVersion is None:
+            self.report({'WARNING'},"Nothing new to commit")
+            return {'FINISHED'}
+
+        self.report({'INFO'},f"Commited version {commitVersion}")
+        coll.ac_commit_message = ""
         return {'FINISHED'}
 
 class AC_OT_Diff(bpy.types.Operator):
