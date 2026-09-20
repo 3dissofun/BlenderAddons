@@ -62,6 +62,10 @@ class AC_OT_Diff(bpy.types.Operator):
             self.report({'ERROR'},"No collection found to diff")
             return {'CANCELLED'}
 
+        if not bpy.data.is_saved:
+            self.report({'ERROR'},"Save the file before diffing")
+            return {'CANCELLED'}
+
         results = versionControl.diff(coll)
         if not results:
             return {'CANCELLED'}
