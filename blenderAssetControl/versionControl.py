@@ -100,7 +100,7 @@ def diff(collection, assetData=None):
     headFile = commitDir / "head"
 
     if not headFile.exists():
-        print(f"VERSION CONTROL: ERROR, Local head file '{str(headFile)}' not found!")
+        print(f"VERSION CONTROL: INFO, Local head file '{str(headFile)}' not found!")
         return
 
     header = int(headFile.read_text(encoding="utf-8").strip())
