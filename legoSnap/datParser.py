@@ -1,9 +1,31 @@
+# The purpose of this file is to provide a function that takes in a .dat piece file, and returns:
+# (listOfFaceData,listOfFaceColors,listOfConnectionAttributes)
+# This should return enough data to properly construct basic geo for the piece, and set up snapping
+
 import numpy as np
 import os
 
 commandMap = {"0":"free","1":"include","2":"edge","3":"triangle","4":"quad","5":"optLine"}
+libraryDir = r"C:\Users\Josh\Downloads\complete\ldraw"
+searchDirs = [os.path.join(libraryDir,"parts"), os.path.join(libraryDir,"p")]
+
+def resolveFile(filename, localDir=""):
+    clean = filename.replace("\\", os.sep)
+    # check the folder the parent file lives in first
+    if localDir:
+        local = os.path.join(localDir, clean)
+        if os.path.isfile(local):
+            return local
+    # then search the library
+    for searchDir in searchDirs:
+        candidate = os.path.join(searchDir, clean)
+        if os.path.isfile(candidate):
+            return candidate
+    return None
 
 def parseCommands(filePath):
+    # This function reads raw .dat files and returns a list of
+    # (commandType,commandArguments)
     with open(filePath,"r",encoding='UTF-8') as f:
         rawLines = f.readlines()
 
@@ -11,7 +33,10 @@ def parseCommands(filePath):
     for line in rawLines:
         if not line:
             continue
-        commandType = line[0]
+        parts = line.split()
+        if not parts:
+            continue
+        commandType = parts[0]
         command = commandMap.get(commandType,None)
         if not command:
             continue
@@ -23,6 +48,9 @@ def parseCommands(filePath):
     return parsedResult
 
 def parseInclude(args):
+    # Function to take in an include command and parse out:
+    # colorInt, positionVector, matrix, filenameToInclude
+    # returns colorInt, transformMatrix, filename
     parts = args.split()
     colour = int(parts[0])
     x, y, z = float(parts[1]), float(parts[2]), float(parts[3])
@@ -40,6 +68,7 @@ def parseInclude(args):
     return colour, matrix, filename
 
 def parsePolygon(args, numVerts):
+    # Takes a polygon command and returns a list of point colors and point positions
     parts = args.split()
     colour = int(parts[0])
     coords = [float(v) for v in parts[1 : 1 + numVerts * 3]]
@@ -47,12 +76,11 @@ def parsePolygon(args, numVerts):
     return colour, points
 
 def transformPoints(matrix, points):
+    # Transforms a list of points by a transform matrix
+    # Returns a list of the transformed points
     pts = np.array([[*p, 1] for p in points])
     transformed = (matrix @ pts.T).T
     return [tuple(row[:3]) for row in transformed]
-
-def resolveFile(filename,localDir):
-    return None
 
 def flatten(filePath, matrix=np.eye(4), colour=16):
     parsed = parseCommands(filePath)
@@ -78,7 +106,3 @@ def flatten(filePath, matrix=np.eye(4), colour=16):
             faces.extend(flatten(childPath, matrix @ incMatrix, incColour))
 
     return faces
-
-output = flatten("3001.dat")
-for o in output:
-    print(o)

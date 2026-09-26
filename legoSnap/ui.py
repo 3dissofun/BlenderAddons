@@ -12,6 +12,9 @@ class LE_PT_LegoPanel(bpy.types.Panel):
     def draw(self,context):
         scene = context.scene
         layout = self.layout
+        wm = context.window_manager
+        layout.prop(wm,"brick_id")
+        layout.operator("lego.import_brick",text="Import Brick", icon='CUBE')
         layout.operator("lego.snap_build",text="Snap Build", icon='MOD_BUILD')
 
 classes = (LE_PT_LegoPanel,)

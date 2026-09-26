@@ -1,5 +1,23 @@
 import bpy
 
+from . import brickBuilder
+
+class LE_OT_ImportBrick(bpy.types.Operator):
+    bl_idname = "lego.import_brick"
+    bl_label = "Import Brick"
+    bl_options = {'REGISTER'}
+
+    def execute(self,context):
+        wm = bpy.context.window_manager
+        brickId = wm.brick_id
+        if not brickId:
+            self.report({'WARNING'},"Please provide a brick ID")
+            return {'CANCELLED'}
+
+        obj = brickBuilder.makeBrick(brickId)
+        context.scene.collection.objects.link(obj)
+        return {'FINISHED'}
+
 class LE_OT_SnapBuild(bpy.types.Operator):
     bl_idname = "lego.snap_build"
     bl_label = "Snap Build"
@@ -33,7 +51,7 @@ class LE_OT_SnapBuild(bpy.types.Operator):
  
         return {"RUNNING_MODAL"}
 
-classes = (LE_OT_SnapBuild,)
+classes = (LE_OT_SnapBuild,LE_OT_ImportBrick)
 
 def register():
     for c in classes:
