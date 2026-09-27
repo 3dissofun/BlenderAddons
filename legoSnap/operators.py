@@ -61,8 +61,6 @@ class LE_OT_ImportBrick(bpy.types.Operator):
             self.report({'WARNING'},"No brick found for given ID")
             return {'CANCELLED'}
 
-# (maleShape, femaleShape) pairs that fit when the radius matches
-SHAPE_FITS = {("R", "R"), ("A", "A"), ("A", "R"), ("S", "S")}
 
 def areSnapsCompatible(snapA, snapB):
     # kind must match and genders must be opposite
@@ -91,8 +89,7 @@ def areSnapsCompatible(snapA, snapB):
     if not maleSecs or not femaleSecs:
         return True
 
-    return any(abs(mr - fr) < 1e-3 and (ms == fs or (ms, fs) in SHAPE_FITS)
-               for ms, mr in maleSecs for fs, fr in femaleSecs)
+    return True 
 
 def snapCorrection(mySnapWorld, theirSnapWorld):
     # matrix that, applied on the left, seats mySnap onto theirSnap
