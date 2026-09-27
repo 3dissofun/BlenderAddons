@@ -9,6 +9,7 @@ class LE_AddonPreferences(bpy.types.AddonPreferences):
     def draw(self,context):
         layout = self.layout
         layout.prop(self,"pieceLibrary")
+        layout.prop(self,"shadowLibrary")
 
 class LE_LegoSnap(bpy.types.PropertyGroup):
     kind: StringProperty() # SNAP_CYL,SNAP_CLP...
