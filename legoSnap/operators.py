@@ -2,14 +2,42 @@ import bpy
 from bpy_extras import view3d_utils
 
 import time
+import numpy as np
+import random
 from mathutils import Matrix, Quaternion, Vector
+from mathutils.kdtree import KDTree
 
 from . import brickBuilder, datParser
+
+class LE_OT_ImportRandom(bpy.types.Operator):
+    bl_idname = "lego.import_random"
+    bl_label = "Import Brick"
+    bl_options = {'REGISTER','UNDO'}
+
+    def execute(self,context):
+        start = time.perf_counter()
+        wm = bpy.context.window_manager
+
+        brickId = random.randrange()
+        pieceLibrary = bpy.context.preferences.addons[__package__].preferences.pieceLibrary
+        shadowLibrary = bpy.context.preferences.addons[__package__].preferences.shadowLibrary
+
+        datParser.libraryDir = pieceLibrary
+        datParser.shadowDir = shadowLibrary
+        obj = brickBuilder.makeBrick(brickId)
+        if obj:
+            duration = round(time.perf_counter() - start,4)*1000
+            self.report({'INFO'},f"Brick built in {duration}ms")
+            context.scene.collection.objects.link(obj)
+            return {'FINISHED'}
+        else:
+            self.report({'WARNING'},"No brick found for given ID")
+            return {'CANCELLED'}
 
 class LE_OT_ImportBrick(bpy.types.Operator):
     bl_idname = "lego.import_brick"
     bl_label = "Import Brick"
-    bl_options = {'REGISTER'}
+    bl_options = {'REGISTER','UNDO'}
 
     def execute(self,context):
         start = time.perf_counter()
@@ -33,98 +61,86 @@ class LE_OT_ImportBrick(bpy.types.Operator):
             self.report({'WARNING'},"No brick found for given ID")
             return {'CANCELLED'}
 
-def objsInRadius(center_obj, radius, include_types=None, exclude_center=True):
-    """Return a list of objects whose world-space origin is within `radius` of center_obj."""
-    center = center_obj.matrix_world.translation
-    radius_sq = radius * radius  # compare squared distances, avoids sqrt
-    found = []
+# (maleShape, femaleShape) pairs that fit when the radius matches
+SHAPE_FITS = {("R", "R"), ("A", "A"), ("A", "R"), ("S", "S")}
 
-    for obj in bpy.context.scene.objects:
-        if exclude_center and obj == center_obj:
-            continue
-        if include_types and obj.type not in include_types:
-            continue
-
-        offset = obj.matrix_world.translation - center
-        if offset.length_squared <= radius_sq:
-            found.append(obj)
-
-    return found
-
-def worldSnaps(obj):
-    # (index, snapData, worldPos, worldAxis) for every snap on obj
-    mw = obj.matrix_world
-    out = []
-    for i, s in enumerate(obj.data.lego_snaps):
-        m = mw @ snapMatrix(s)
-        # LDraw's local +Y (the snap axis) becomes -Z after your LDtoBL conjugation
-        axis = (m.to_3x3() @ Vector((0, 0, -1))).normalized()
-        out.append((i, s, m.translation.copy(), axis))
-    return out
-
-def snapsCompatible(a, b):
-    if a.kind != b.kind:
+def areSnapsCompatible(snapA, snapB):
+    # kind must match and genders must be opposite
+    if snapA.kind != snapB.kind:
         return False
-    return {a.gender.upper(), b.gender.upper()} == {"M", "F"}
+    genderA, genderB = snapA.gender.upper(), snapB.gender.upper()
+    if {genderA, genderB} != {"M", "F"}:
+        return False
+    male, female = (snapA, snapB) if genderA == "M" else (snapB, snapA)
 
-def findSnapCandidates(movingObj, others, maxDist=0.2, minAlign=0.99):
-    # Returns [(distance, mySnapIndex, otherObjName, otherSnapIndex)], nearest first
-    mine = worldSnaps(movingObj)
-    if not mine:
-        return []
-    candidates = []
-    for other in others:
-        if other is movingObj or not len(other.data.lego_snaps):
-            continue
-        for j, oSnap, oPos, oAxis in worldSnaps(other):
-            for i, mSnap, mPos, mAxis in mine:
-                if not snapsCompatible(mSnap, oSnap):
-                    continue
-                dist = (mPos - oPos).length
-                if dist > maxDist:
-                    continue
-                if abs(mAxis.dot(oAxis)) < minAlign:  # axes must be parallel
-                    continue
-                candidates.append((dist, i, other.name, j))
-    candidates.sort(key=lambda c: c[0])
-    return candidates
+    # clips / fingers: single radius must match
+    if male.radius and female.radius:
+        try:
+            if abs(float(male.radius) - float(female.radius)) > 1e-3:
+                return False
+        except ValueError:
+            pass
 
-def snapTransform(movingObj, myIndex, other, otherIndex):
-    # Returns a new matrix_world for movingObj that seats its snap on other's snap
-    mw = movingObj.matrix_world
-    mySnap = mw @ snapMatrix(movingObj.data.lego_snaps[myIndex])
-    theirSnap = other.matrix_world @ snapMatrix(other.data.lego_snaps[otherIndex])
+    # cylinders: secs is "shape radius length" repeated, at least one male section must fit a female one
+    try:
+        mTok, fTok = male.secs.split(), female.secs.split()
+        maleSecs = list(zip((s.upper() for s in mTok[0::3]), map(float, mTok[1::3])))
+        femaleSecs = list(zip((s.upper() for s in fTok[0::3]), map(float, fTok[1::3])))
+    except ValueError:
+        return True  # unreadable secs: fall back to kind + gender
+    if not maleSecs or not femaleSecs:
+        return True
 
-    snapAxis = Vector((0, 0, -1))  # LDraw +Y after your LDtoBL conversion
-    myAxis = (mySnap.to_3x3() @ snapAxis).normalized()
-    theirAxis = (theirSnap.to_3x3() @ snapAxis).normalized()
+    return any(abs(mr - fr) < 1e-3 and (ms == fs or (ms, fs) in SHAPE_FITS)
+               for ms, mr in maleSecs for fs, fr in femaleSecs)
 
-    # 1. rotate the brick about my snap point so the axes line up
-    myPos = mySnap.translation
+def snapCorrection(mySnapWorld, theirSnapWorld):
+    # matrix that, applied on the left, seats mySnap onto theirSnap
+    snapAxis = Vector((0, 0, -1))  # LDraw +Y after the LDtoBL conversion
+    myAxis = (mySnapWorld.to_3x3() @ snapAxis).normalized()
+    theirAxis = (theirSnapWorld.to_3x3() @ snapAxis).normalized()
+
+    myPos = mySnapWorld.translation
     rot = myAxis.rotation_difference(theirAxis).to_matrix().to_4x4()
     pivot = Matrix.Translation(myPos) @ rot @ Matrix.Translation(-myPos)
+    move = Matrix.Translation(theirSnapWorld.translation - myPos)
+    return move @ pivot
 
-    # 2. slide my snap point onto theirs
-    move = Matrix.Translation(theirSnap.translation - myPos)
+def hasAncestorIn(obj, objSet):
+    p = obj.parent
+    while p:
+        if p in objSet:
+            return True
+        p = p.parent
+    return False
 
-    return move @ pivot @ mw
+def projectToRegion(region, rv3d, pts):
+    # pts: (N, 3) world positions -> (N, 2) region pixel coords + mask of points in front of the view
+    # same maths as view3d_utils.location_3d_to_region_2d, vectorised
+    persp = np.array(rv3d.perspective_matrix)
+    clip = np.hstack([pts, np.ones((len(pts), 1))]) @ persp.T
+    w = clip[:, 3]
+    valid = w > 1e-6
+    w = np.where(valid, w, 1.0)  # rows behind the view are masked out anyway
+    x = region.width * 0.5 * (1.0 + clip[:, 0] / w)
+    y = region.height * 0.5 * (1.0 + clip[:, 1] / w)
+    return np.column_stack([x, y]), valid
 
 class LE_OT_SnapBuild(bpy.types.Operator):
     bl_idname = "lego.snap_build"
     bl_label = "Snap Build"
-    bl_options = {'REGISTER'}
+    bl_options = {'REGISTER', 'UNDO'}
 
     def mouseCoord(self, event):
         return (event.mouse_x - self.region.x, event.mouse_y - self.region.y)
 
     def mouseTo3d(self, event):
-        # point under the mouse on the view-facing plane through the start position
         return view3d_utils.region_2d_to_location_3d(
             self.region, self.rv3d, self.mouseCoord(event), self.startLoc)
 
     def invoke(self, context, event):
-        self.obj = context.active_object
-        if not self.obj or context.area.type != 'VIEW_3D':
+        active = context.active_object
+        if not active or context.area.type != 'VIEW_3D':
             self.report({'WARNING'}, "Needs an active object in the 3D viewport")
             return {'CANCELLED'}
 
@@ -132,39 +148,134 @@ class LE_OT_SnapBuild(bpy.types.Operator):
         self.region = next(r for r in self.area.regions if r.type == 'WINDOW')
         self.rv3d = self.area.spaces.active.region_3d
 
-        self.startMatrix = self.obj.matrix_world.copy()
-        self.startLoc = self.startMatrix.translation.copy()
-        # keep the brick where it is relative to the cursor, like G does
+        selected = set(context.selected_objects) | {active}
+        # children follow their parent, so only drive the top of each selected hierarchy
+        self.movers = [o for o in selected if not hasAncestorIn(o, selected)]
+        movingSet = set(self.movers)
+        self.startMatrices = {o.name: o.matrix_world.copy() for o in self.movers}
+
+        # grab relative to the active object, like G does
+        self.startLoc = active.matrix_world.translation.copy()
         self.grabOffset = self.startLoc - self.mouseTo3d(event)
-        self.snapCandidates = []
+
+        # split every snap in the scene into "moving with me" and "stationary target"
+        # entries: (objName, snapIndex, worldSnapMatrix at start, kind, gender)
+        self.movingSnaps = []
+        self.targets = []
+        for o in context.visible_objects:
+            if o.type != 'MESH' or not len(o.data.lego_snaps):
+                continue
+            moving = o in movingSet or hasAncestorIn(o, movingSet)
+            mw = o.matrix_world
+            for j, s in enumerate(o.data.lego_snaps):
+                entry = (o.name, j, mw @ snapMatrix(s), s)
+                (self.movingSnaps if moving else self.targets).append(entry)
+
+        # flat arrays for vectorised projection
+        self.targetPos = np.array([e[2].translation for e in self.targets], dtype=float).reshape(-1, 3)
+        self.movingPos = np.array([e[2].translation for e in self.movingSnaps], dtype=float).reshape(-1, 3)
+
+        self.viewKey = None  # forces a rebuild on the first move
+        self.tree = None
+        self.targetDepth = None
+
+        # UX Feel
+        self.snapPixelRadius = 50
+        self.stickiness = 8
+        self.depthScale = 0.48
+        self.depthPenalty = 15
+        self.lockedPair = None  # (movingSnapIndex, targetIndex)
 
         context.window_manager.modal_handler_add(self)
         return {'RUNNING_MODAL'}
+
+    def rebuildScreenIndex(self):
+        # project every target once and bucket the on-screen ones into KD-trees by (kind, gender)
+        region, rv3d = self.region, self.rv3d
+        self.trees = {}
+        if not len(self.targetPos):
+            return
+
+        scr, valid = projectToRegion(region, rv3d, self.targetPos)
+        view = np.array(rv3d.view_matrix)
+        self.targetDepth = -(self.targetPos @ view[:3, :3].T + view[:3, 3])[:, 2]
+
+        r = self.snapPixelRadius
+        onScreen = (valid
+                    & (scr[:, 0] > -r) & (scr[:, 0] < region.width + r)
+                    & (scr[:, 1] > -r) & (scr[:, 1] < region.height + r))
+
+        idxs = np.flatnonzero(onScreen)
+        self.tree = None
+        if len(idxs):
+            self.tree = KDTree(len(idxs))
+            for t in idxs:
+                self.tree.insert((scr[t, 0], scr[t, 1], 0.0), int(t))
+            self.tree.balance()
+
+    def findScreenSnap(self, offset):
+        # rebuild the screen index only when the view has changed (orbit / pan / zoom / resize)
+        viewKey = (tuple(tuple(row) for row in self.rv3d.perspective_matrix),
+                   self.region.width, self.region.height)
+        if viewKey != self.viewKey:
+            self.viewKey = viewKey
+            self.rebuildScreenIndex()
+        if self.tree is None or not len(self.movingPos):
+            return None
+
+        region, r = self.region, self.snapPixelRadius
+        scr, valid = projectToRegion(region, self.rv3d, self.movingPos + np.array(offset))
+        valid &= ((scr[:, 0] > -r) & (scr[:, 0] < region.width + r)
+                  & (scr[:, 1] > -r) & (scr[:, 1] < region.height + r))
+
+        hits = []  # (pixelDist, depth, movingIndex, targetIndex)
+        for k in np.flatnonzero(valid):
+            mySnap = self.movingSnaps[k][3]
+            for _, t, d in self.tree.find_range((scr[k, 0], scr[k, 1], 0.0), r):
+                if areSnapsCompatible(mySnap, self.targets[t][3]):
+                    hits.append((d, self.targetDepth[t], int(k), t))        
+
+        if not hits:
+            return None
+
+        nearest = min(h[1] for h in hits)
+        best = None
+        for d, depth, k, t in hits:
+            score = d + self.depthPenalty * (depth - nearest) / self.depthScale
+            if (k, t) == self.lockedPair:
+                score -= self.stickiness
+            if best is None or score < best[0]:
+                best = (score, k, t)
+        return best
+
+    def applyToGroup(self, m):
+        for o in self.movers:
+            o.matrix_world = m @ self.startMatrices[o.name]
 
     def modal(self, context, event):
         if event.type in {'MIDDLEMOUSE', 'WHEELUPMOUSE', 'WHEELDOWNMOUSE'}:
             return {'PASS_THROUGH'}
 
         if event.type == 'MOUSEMOVE':
-            # free position: start orientation, translation follows the mouse
-            m = self.startMatrix.copy()
-            m.translation = self.mouseTo3d(event) + self.grabOffset
-            self.obj.matrix_world = m
-            context.view_layer.update()
+            offset = self.mouseTo3d(event) + self.grabOffset - self.startLoc
+            delta = Matrix.Translation(offset)
 
-            nearby = objsInRadius(self.obj, 5.0, include_types={'MESH'})
-            self.snapCandidates = findSnapCandidates(self.obj, nearby)
-            if self.snapCandidates:
-                _, i, otherName, j = self.snapCandidates[0]
-                other = bpy.data.objects.get(otherName)
-                if other:
-                    self.obj.matrix_world = snapTransform(self.obj, i, other, j)
+            best = self.findScreenSnap(offset)
+            if best:
+                _, k, t = best
+                mySnap = delta @ self.movingSnaps[k][2]  # that snap at the free position
+                corr = snapCorrection(mySnap, self.targets[t][2])
+                self.applyToGroup(corr @ delta)
+                self.lockedPair = (k, t)
+            else:
+                self.applyToGroup(delta)
+                self.lockedPair = None
 
         elif event.type in {'LEFTMOUSE', 'RET', 'NUMPAD_ENTER'} and event.value == 'PRESS':
             return {'FINISHED'}
 
         elif event.type in {'RIGHTMOUSE', 'ESC'} and event.value == 'PRESS':
-            self.obj.matrix_world = self.startMatrix  # restore, like cancelling G
+            self.applyToGroup(Matrix.Identity(4))  # back to start matrices
             return {'CANCELLED'}
 
         return {'RUNNING_MODAL'}
@@ -184,8 +295,8 @@ class LE_GGT_SnapPoints(bpy.types.GizmoGroup):
     bl_region_type = 'WINDOW'
     bl_options = {'3D', 'PERSISTENT', 'SHOW_MODAL_ALL'}
 
-    maleCol = (1.0, 0.35, 0.2)
-    femaleCol = (0.2, 0.6, 1.0)
+    maleCol = (1.0, 0.8, 0.0)
+    femaleCol = (1.0, 0.8, 0.0)
 
     @classmethod
     def poll(cls, context):
@@ -228,10 +339,10 @@ class LE_GGT_SnapPoints(bpy.types.GizmoGroup):
                 gz.draw_style = 'RING_2D'
                 gz.draw_options = {'FILL','ALIGN_VIEW'}
                 gz.hide_select = True
-                gz.scale_basis = 0.08
+                gz.scale_basis = 0.04
                 isMale = s.gender.upper() == 'M'
                 gz.color = self.maleCol if isMale else self.femaleCol
-                gz.alpha = 0.8
+                gz.alpha = 1.0
                 self.entries.append((obj.name, i))
 
 class LE_OT_ToggleSnaps(bpy.types.Operator):

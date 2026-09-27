@@ -41,6 +41,7 @@ def makeBrick(brickId):
         snap.gender = attrs.get("gender","")
         snap.caps = attrs.get("caps", "")
         snap.secs = attrs.get("secs", "")
+        snap.radius = attrs.get("radius", "")
 
         x,y,z = attrs["worldPos"]
         snap.location = (x*brickSf, z*brickSf, -y*brickSf)

@@ -16,6 +16,7 @@ class LE_LegoSnap(bpy.types.PropertyGroup):
     gender: StringProperty() # M or F
     caps: StringProperty()
     secs: StringProperty()
+    radius: StringProperty()
     location: FloatVectorProperty(size=3, subtype='TRANSLATION')
     rotation: FloatVectorProperty(size=4, subtype='QUATERNION', default=(1,0,0,0))
 
