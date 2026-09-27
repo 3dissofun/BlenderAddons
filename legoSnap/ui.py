@@ -16,6 +16,7 @@ class LE_PT_LegoPanel(bpy.types.Panel):
         layout.prop(wm,"brick_id")
         layout.operator("lego.import_brick",text="Import Brick", icon='CUBE')
         layout.operator("lego.snap_build",text="Snap Build", icon='MOD_BUILD')
+        layout.operator("lego.toggle_snaps",text="Toggle Snaps", icon='MOD_BUILD')
 
 classes = (LE_PT_LegoPanel,)
 

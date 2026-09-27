@@ -4,8 +4,17 @@
 import bpy
 from . import datParser
 
+from mathutils import Matrix
+
+brickSf = 0.02 # for real world scale
+LDtoBL = Matrix(((1, 0, 0), # Transform matrix to convert between LDraw and Blender axis
+                   (0, 0, 1),
+                   (0, -1, 0))) # same axis swap as your verts: (x, z, -y)
+
 def makeBrick(brickId):
-    faces = datParser.flatten(datParser.resolveFile(f"{brickId}.dat"))
+    faces, snaps = datParser.flatten(datParser.resolveFile(f"{brickId}.dat"))
+    if not faces:
+        return None
  
     verts = []
     vertIndex = {}
@@ -26,5 +35,19 @@ def makeBrick(brickId):
     mesh.validate()
     mesh.update()
      
+    for kind, attrs in snaps:
+        snap = mesh.lego_snaps.add()
+        snap.kind = kind
+        snap.gender = attrs.get("gender","")
+        snap.caps = attrs.get("caps", "")
+        snap.secs = attrs.get("secs", "")
+
+        x,y,z = attrs["worldPos"]
+        snap.location = (x*brickSf, z*brickSf, -y*brickSf)
+
+        ori = Matrix(attrs["worldOri"].tolist())
+        blOri = LDtoBL @ ori @ LDtoBL.transposed()
+        snap.rotation = blOri.normalized().to_quaternion()
+
     obj = bpy.data.objects.new(brickId, mesh)
     return obj

@@ -10,7 +10,7 @@ bl_info = {
     "category": "Modelling",
 }
 
-from . import props, operators, ui 
+from . import props, operators, ui
 
 def register():
     props.register()
