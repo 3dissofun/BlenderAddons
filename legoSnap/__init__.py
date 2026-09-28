@@ -10,15 +10,19 @@ bl_info = {
     "category": "Modelling",
 }
 
-from . import props, operators, ui, browser
+from . import props, operators, ui, browser, importModel, exportLxfml
 
 def register():
     props.register()
     browser.register()
     operators.register()
     ui.register()
+    importModel.register()
+    exportLxfml.register()
 
 def unregister():
+    exportLxfml.unregister()
+    importModel.unregister()
     operators.unregister()
     ui.unregister()
     browser.unregister()
