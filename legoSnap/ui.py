@@ -1,5 +1,7 @@
 import bpy
 
+from . import browser
+
 panelName = "Lego"
 
 class LE_PT_LegoPanel(bpy.types.Panel):
@@ -10,13 +12,20 @@ class LE_PT_LegoPanel(bpy.types.Panel):
     bl_category = panelName
 
     def draw(self,context):
-        scene = context.scene
         layout = self.layout
         wm = context.window_manager
-        layout.prop(wm,"brick_id")
-        layout.operator("lego.import_brick",text="Import Brick", icon='CUBE')
-        layout.operator("lego.snap_build",text="Snap Build", icon='MOD_BUILD')
-        layout.operator("lego.toggle_snaps",text="Toggle Snaps", icon='MOD_BUILD')
+
+        row = layout.row(align=True)
+        row.prop(wm, "brick_search", text="", icon='VIEWZOOM')
+        row.operator("lego.refresh_previews", text="", icon='FILE_REFRESH')
+        layout.template_icon_view(wm, "brick_browser", show_labels=True, scale=6.0, scale_popup=5.0)
+        desc = browser.describe(wm.brick_id)
+        if desc:
+            layout.label(text=desc)
+        layout.prop(wm, "brick_id")
+        layout.operator("lego.import_brick", text="Import Brick", icon='CUBE')
+        layout.operator("lego.snap_build", text="Snap Build", icon='MOD_BUILD')
+        layout.operator("lego.toggle_snaps", text="Toggle Snaps", icon='MOD_BUILD')
 
 classes = (LE_PT_LegoPanel,)
 
