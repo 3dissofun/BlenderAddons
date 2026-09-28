@@ -1,23 +1,38 @@
-# Batch preview renderer for the Lego Environment addon.
-# Run from Blender's Text Editor (not --background: viewport render needs a GPU context)
-# with the addon enabled. Progress is printed to the system console.
+# Batch preview renderer for the Lego Environment addon - parallel version.
+#
+# Blender's Python API isn't thread-safe and rendering has to happen on the main thread,
+# so instead of threads this runs several background Blender processes ("workers"),
+# each rendering its own share of the parts list. The Workbench engine renders fine in
+# --background mode, so the workers don't need a window.
+#
+# Run it either way:
+#   - from Blender's Text Editor with the addon enabled (Blender waits until all workers finish), or
+#   - from a terminal:  blender --background --python render_previews.py
+# Progress from all workers is printed to the system console / terminal.
 
 import bpy
 import os
 import sys
+import json
 import math
 import time
+import tempfile
 import traceback
+import subprocess
 from mathutils import Vector, Euler, Color
 
 # SETTINGS
+WORKERS = min(4, os.cpu_count() or 1)  # parallel Blender processes; they share one GPU, so more isn't always faster
 RESOLUTION = 512
 MARGIN = 1.15                   # padding around the brick in frame
 SKIP_EXISTING = True            # don't re-render previews that already exist
 LIMIT = None                    # e.g. 20 to test on the first 20 parts
 JPEG_QUALITY = 90
+RENDER_AA = '8'                 # Workbench anti-aliasing samples: 'OFF', 'FXAA', '5', '8', '11', '16', '32'
 CAM_ROTATION = Euler((math.radians(60), 0, math.radians(45)))  # 3/4 view looking down
 
+
+# ---------------------------------------------------------------- shared helpers
 
 def themeBackground():
     # the 3D viewport's theme background, converted to linear so the render matches on screen
@@ -54,6 +69,7 @@ def makePreviewScene():
     r.image_settings.color_mode = 'RGB'
     r.image_settings.quality = JPEG_QUALITY
     scene.view_settings.view_transform = 'Standard'
+    scene.display.render_aa = RENDER_AA
 
     shading = scene.display.shading
     shading.light = 'STUDIO'
@@ -91,21 +107,9 @@ def frameCamera(cam, obj):
     cam.data.clip_end = dist + depth + 1.0
 
 
-def viewportRender(path):
-    bpy.context.scene.render.filepath = path
-    override = {"window": bpy.context.window}
-    # give the operator a 3D view if one is open (harmless otherwise)
-    for area in bpy.context.window.screen.areas:
-        if area.type == 'VIEW_3D':
-            override["area"] = area
-            override["region"] = next(r for r in area.regions if r.type == 'WINDOW')
-            break
-    with bpy.context.temp_override(**override):
-        # view_context=False: render through the scene camera with the scene's Workbench settings
-        bpy.ops.render.opengl(write_still=True, view_context=False)
+# ---------------------------------------------------------------- worker (background Blender)
 
-
-def main():
+def worker(shard, shardCount, resultPath):
     brickBuilder, datParser, pkg = findAddon()
     prefs = bpy.context.preferences.addons[pkg].preferences
     datParser.libraryDir = bpy.path.abspath(prefs.pieceLibrary)
@@ -120,54 +124,114 @@ def main():
                  if f.lower().endswith(".dat") and os.path.isfile(os.path.join(partsDir, f)))
     if LIMIT:
         ids = ids[:LIMIT]
+    # interleaved split, so simple and complex parts are spread evenly across workers
+    ids = ids[shard::shardCount]
 
-    window = bpy.context.window
-    originalScene = window.scene
     scene, cam = makePreviewScene()
-    window.scene = scene
-
     done, skipped, failed = 0, 0, []
-    start = time.perf_counter()
-    try:
-        for n, brickId in enumerate(ids, 1):
-            outPath = os.path.join(outDir, f"{brickId}.jpg")
-            if SKIP_EXISTING and os.path.isfile(outPath):
-                skipped += 1
+
+    for n, brickId in enumerate(ids, 1):
+        outPath = os.path.join(outDir, f"{brickId}.jpg")
+        if SKIP_EXISTING and os.path.isfile(outPath):
+            skipped += 1
+            continue
+
+        obj = None
+        try:
+            obj = brickBuilder.makeBrick(brickId)
+            if obj is None:
+                failed.append((brickId, "no geometry"))
                 continue
+            scene.collection.objects.link(obj)
+            frameCamera(cam, obj)
+            scene.render.filepath = outPath
+            bpy.ops.render.render(write_still=True, scene=scene.name)
+            done += 1
+        except Exception as e:
+            traceback.print_exc()
+            failed.append((brickId, str(e)))
+        finally:
+            if obj is not None:
+                mesh = obj.data
+                bpy.data.objects.remove(obj)
+                bpy.data.meshes.remove(mesh)
 
-            obj = None
-            try:
-                obj = brickBuilder.makeBrick(brickId)
-                if obj is None:
-                    failed.append((brickId, "no geometry"))
-                    continue
-                scene.collection.objects.link(obj)
-                frameCamera(cam, obj)
-                viewportRender(outPath)
-                done += 1
-            except Exception as e:
-                traceback.print_exc()
-                failed.append((brickId, str(e)))
-            finally:
-                if obj is not None:
-                    mesh = obj.data
-                    bpy.data.objects.remove(obj)
-                    bpy.data.meshes.remove(mesh)
+        print(f"[worker {shard + 1}] [{n}/{len(ids)}] {brickId}", flush=True)
 
-            print(f"[{n}/{len(ids)}] {brickId}")
+    with open(resultPath, "w") as f:
+        json.dump({"done": done, "skipped": skipped, "failed": failed, "outDir": outDir}, f)
+
+
+# ---------------------------------------------------------------- launcher
+
+def workerScript(tmpDir):
+    # Workers need this script as a file on disk. When run from the Text Editor, use the
+    # text block's current contents (works even if it's unsaved); otherwise use __file__.
+    space = getattr(bpy.context, "space_data", None)
+    if space is not None and space.type == 'TEXT_EDITOR' and space.text is not None:
+        path = os.path.join(tmpDir, "render_previews_worker.py")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(space.text.as_string())
+        return path
+    if os.path.isfile(__file__):
+        return __file__
+    raise RuntimeError("Can't locate this script on disk - save it to a .py file and run it again")
+
+
+def launcher():
+    findAddon()  # fail early if the addon isn't enabled
+    tmpDir = tempfile.mkdtemp(prefix="lego_previews_")
+    script = workerScript(tmpDir)
+
+    print(f"Starting {WORKERS} render workers...", flush=True)
+    start = time.perf_counter()
+    procs = []
+    try:
+        for i in range(WORKERS):
+            resultPath = os.path.join(tmpDir, f"worker{i}.json")
+            cmd = [bpy.app.binary_path, "--background", "--python", script,
+                   "--", "--shard", str(i), str(WORKERS), resultPath]
+            procs.append((i, resultPath, subprocess.Popen(cmd)))
+        for _, _, p in procs:
+            p.wait()
     finally:
-        window.scene = originalScene
-        camData, world = cam.data, scene.world
-        bpy.data.objects.remove(cam)
-        bpy.data.cameras.remove(camData)
-        bpy.data.scenes.remove(scene)
-        bpy.data.worlds.remove(world)
+        # if the launcher is interrupted, don't leave workers running
+        for _, _, p in procs:
+            if p.poll() is None:
+                p.terminate()
+
+    done, skipped, failed, outDir = 0, 0, [], None
+    for i, resultPath, p in procs:
+        if not os.path.isfile(resultPath):
+            failed.append((f"worker {i + 1}", f"crashed (exit code {p.returncode}) - see console output"))
+            continue
+        with open(resultPath) as f:
+            res = json.load(f)
+        done += res["done"]
+        skipped += res["skipped"]
+        failed += [tuple(x) for x in res["failed"]]
+        outDir = res["outDir"]
 
     mins = (time.perf_counter() - start) / 60
     print(f"\nPreviews: {done} rendered, {skipped} skipped, {len(failed)} failed in {mins:.1f} min")
     for brickId, reason in failed:
         print(f"  FAILED {brickId}: {reason}")
-    print(f"Saved to {outDir}")
+    if outDir:
+        print(f"Saved to {outDir}")
 
 
-main()
+# ---------------------------------------------------------------- entry point
+
+def shardArgs():
+    argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
+    if "--shard" in argv:
+        i = argv.index("--shard")
+        return int(argv[i + 1]), int(argv[i + 2]), argv[i + 3]
+    return None
+
+
+args = shardArgs()
+if args:
+    worker(*args)
+else:
+    launcher()
