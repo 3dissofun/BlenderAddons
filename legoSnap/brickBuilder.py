@@ -26,7 +26,7 @@ def makeBrick(brickId):
             key = (round(x, 3), round(y, 3), round(z, 3))
             if key not in vertIndex:
                 vertIndex[key] = len(verts)
-                verts.append((x * 0.02, z * 0.02, -y * 0.02))   # LDraw -Y up -> Blender Z up
+                verts.append((x * brickSf , z * brickSf, -y * brickSf))   # LDraw -Y up -> Blender Z up
             poly.append(vertIndex[key])
         polys.append(poly)
      

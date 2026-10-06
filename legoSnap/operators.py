@@ -21,9 +21,11 @@ class LE_OT_ImportRandom(bpy.types.Operator):
         brickId = random.randrange()
         pieceLibrary = bpy.context.preferences.addons[__package__].preferences.pieceLibrary
         shadowLibrary = bpy.context.preferences.addons[__package__].preferences.shadowLibrary
+        sf = bpy.context.preferences.addons[__package__].preferences.scaleFactor
 
         datParser.libraryDir = pieceLibrary
         datParser.shadowDir = shadowLibrary
+        brickBuilder.brickSf = sf
         obj = brickBuilder.makeBrick(brickId)
         if obj:
             duration = round(time.perf_counter() - start,4)*1000
@@ -45,6 +47,8 @@ class LE_OT_ImportBrick(bpy.types.Operator):
         brickId = wm.brick_id
         pieceLibrary = bpy.context.preferences.addons[__package__].preferences.pieceLibrary
         shadowLibrary = bpy.context.preferences.addons[__package__].preferences.shadowLibrary
+        sf = bpy.context.preferences.addons[__package__].preferences.scaleFactor
+        brickBuilder.brickSf = sf
         if not brickId:
             self.report({'WARNING'},"Please provide a brick ID")
             return {'CANCELLED'}

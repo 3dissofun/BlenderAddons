@@ -1,13 +1,15 @@
 import bpy
-from bpy.props import StringProperty, FloatVectorProperty
+from bpy.props import StringProperty, FloatVectorProperty, FloatProperty
 
 class LE_AddonPreferences(bpy.types.AddonPreferences):
     bl_idname = __package__
+    scaleFactor: FloatProperty(name="Scale Factor", default=0.02)
     pieceLibrary: StringProperty(name="Piece Library",subtype='DIR_PATH',default="C:/Users/User/Desktop/pieceLibrary/")
     shadowLibrary: StringProperty(name="Shadow Library",subtype='DIR_PATH',default="C:/Users/User/Desktop/connectorLibrary/")
 
     def draw(self,context):
         layout = self.layout
+        layout.prop(self,"scaleFactor")
         layout.prop(self,"pieceLibrary")
         layout.prop(self,"shadowLibrary")
 
