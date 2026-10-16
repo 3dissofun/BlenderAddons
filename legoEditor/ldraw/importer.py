@@ -18,6 +18,41 @@ LD_TO_BL = np.array([
 LD_TO_BL[:3, :3] *= BRICK_SF
 
 # ---------------------------------------------------------------------------
+# Snaps
+# ---------------------------------------------------------------------------
+ 
+def snapToBlender(matrix):
+    # LDraw snap matrix (LDU, top-level part space) -> mesh local space.
+    # Positions get the full LD_TO_BL (axes + scale); the rotation keeps only the
+    # axis swap so the stored matrix stays orthonormal.
+    m = LD_TO_BL @ matrix
+    m[:3, :3] /= BRICK_SF
+    return m
+ 
+def storeSnaps(mesh, snaps):
+    # Write parser snaps (shadow.Snap, LDU) onto mesh.lego_snaps in Blender units
+    coll = mesh.lego_snaps
+    coll.clear()
+    for s in snaps:
+        item = coll.add()
+        item.kind = s.kind[5:]               # "SNAP_CYL" -> "CYL"
+        item.gender = s.gender
+        item.group = s.group
+        item.ids = ",".join(sorted(s.ids))
+        item.matrix = snapToBlender(s.matrix).ravel().tolist()
+        item.capA, item.capB = s.capA, s.capB
+        item.center, item.slide = s.center, s.slide
+        item.radius = s.radius * BRICK_SF
+        item.length = s.length * BRICK_SF
+        item.bounding = " ".join(s.bounding)
+        item.extra = json.dumps(s.extra) if s.extra else ""
+        for shape, radius, length in s.secs:
+            sec = item.secs.add()
+            sec.shape = shape
+            sec.radius = radius * BRICK_SF
+            sec.length = length * BRICK_SF
+
+# ---------------------------------------------------------------------------
 # Materials
 # ---------------------------------------------------------------------------
 
@@ -115,6 +150,7 @@ def makeBrick(brickId, colId=16, mergeVerts=True, forceNew=True):
     mesh = bpy.data.meshes.new(meshName)
     obj = bpy.data.objects.new(brickId, mesh)
     obj.is_lego = True
+    storeSnaps(mesh, data["connectors"])
 
     nFaces = len(data["faceQuads"])
     if nFaces == 0:

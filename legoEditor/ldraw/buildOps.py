@@ -75,12 +75,53 @@ class LEGO_OT_ImportBrick(bpy.types.Operator):
             self.report({'WARNING'},"No brick found for given ID")
             return {'CANCELLED'}
 
-classes = (LEGO_OT_ImportBrick, LEGO_OT_ImportRandom)
+class LEGO_OT_DebugSnaps(bpy.types.Operator):
+    bl_idname = "lego.debug_snaps"
+    bl_label = "Debug Lego Snaps"
+    bl_options = {'REGISTER'}
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.active_object
+        return (obj is not None
+                and obj.type == 'MESH'
+                and obj.is_lego
+                and hasattr(obj.data, "lego_snaps"))
+
+    def execute(self, context):
+        obj = context.active_object
+        snaps = obj.data.lego_snaps
+        if len(snaps) == 0:
+            self.report({'WARNING'}, f"'{obj.name}' has no snaps")
+            return {'CANCELLED'}
+
+        print(f"=== {obj.name}: {len(snaps)} snaps ===")
+        for i, s in enumerate(snaps):
+            print(f"--- snap {i} ---")
+            for p in s.bl_rna.properties:
+                if p.identifier == "rna_type":
+                    continue
+                v = getattr(s, p.identifier)
+                if p.identifier == "secs":
+                    v = [(x.shape, x.radius, x.length) for x in v]
+                elif p.identifier == "matrix":
+                    v = [round(x, 4) for x in v]
+                print(f"  {p.identifier}: {v}")
+
+        self.report({'INFO'}, f"Printed {len(snaps)} snaps to console")
+        return {'FINISHED'}
+
+classes = (LEGO_OT_ImportBrick, LEGO_OT_ImportRandom, LEGO_OT_DebugSnaps)
+
+def menuDebugSnaps(self, context):
+    self.layout.operator(LEGO_OT_DebugSnaps.bl_idname)
 
 def register():
     for c in classes:
         bpy.utils.register_class(c)
+    bpy.types.VIEW3D_MT_object.append(menuDebugSnaps)
 
 def unregister():
+    bpy.types.VIEW3D_MT_object.remove(menuDebugSnaps)
     for c in reversed(classes):
         bpy.utils.unregister_class(c)

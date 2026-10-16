@@ -78,6 +78,12 @@ class LEGO_OT_editorToggle(bpy.types.Operator):
                 except (ValueError, TypeError):
                     pass  # that region type doesn't exist for this space
 
+        shading = space.shading
+        shading.type = 'SOLID'
+        shading.color_type = 'OBJECT'
+        shading.show_cavity = True
+        shading.cavity_type = 'WORLD'
+
         context.window_manager.modal_handler_add(self)
         self._redraw_all(context)
         return {"RUNNING_MODAL"}
@@ -146,6 +152,9 @@ class LEGO_PT_panel(bpy.types.Panel):
         layout.prop(wm,"brick_id")
         layout.operator("lego.import_brick")
         layout.operator("lego.import_random")
+
+        layout.prop(wm, "lego_show_snaps",toggle=True)
+
         if active:
             layout.label(text="magic is real")
 

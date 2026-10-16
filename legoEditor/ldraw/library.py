@@ -79,8 +79,12 @@ def getShadowSearchDirs():
  
 @lru_cache(maxsize=None)
 def resolveShadowPart(file):
-    # Map a resolved library file to its shadow counterpart, or None
-    if shadowLib is None or partLib is None:
+    # Map a resolved library file to its shadow counterpart, or None.
+    # The shadow tree mirrors the official one (parts/, p/), possibly under offLib/.
+    if partLib is None:
+        return None
+    shadowDirs = getShadowSearchDirs()
+    if not shadowDirs:
         return None
     file = Path(file).resolve()
     for base in getSearchDirs():
@@ -88,13 +92,35 @@ def resolveShadowPart(file):
             rel = file.relative_to(base)
         except ValueError:
             continue
-        candidate = shadowLib / base.name / rel
-        return candidate if candidate.is_file() else None
+        for sDir in shadowDirs:
+            if sDir.name == base.name:
+                candidate = sDir / rel
+                if candidate.is_file():
+                    return candidate
+        return None
     return None
-
+ 
+@lru_cache(maxsize=None)
+def resolveShadowRef(relPath):
+    # Resolve a SNAP_INCL ref (e.g. "s\\3003s01.dat", "connhole.dat") directly in
+    # the shadow library. Official p/ is searched before parts/, as for parts.
+    name = relPath.replace("\\", "/").strip().lower()
+    dirs = sorted(getShadowSearchDirs(), key=lambda d: d.name != "p")
+    for sDir in dirs:
+        candidate = sDir / name
+        if candidate.is_file():
+            return candidate
+    return None
+ 
 def clearCaches():
     getSearchDirs.cache_clear()
     getShadowSearchDirs.cache_clear()
     resolvePart.cache_clear()
     resolveShadowPart.cache_clear()
+    resolveShadowRef.cache_clear()
     resolveTexture.cache_clear()
+    try:
+        from . import snapping 
+        snapping.clearCaches()
+    except ImportError:
+        pass

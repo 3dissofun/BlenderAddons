@@ -2,7 +2,7 @@ import numpy as np
 import shlex
 from pathlib import Path
 
-from . import library, textures
+from . import library, textures, snapping
 
 def buildFace(lArgs, nVerts, col, matrix, reverse, tex, output):
     # Build a triangle (nVerts=3) or quad (nVerts=4) from a type 3 or 4 line
@@ -49,8 +49,14 @@ def parsePart(file,col=16,matrix=np.eye(4),flip=False,output=None,parentTex=None
     # Supports winding order/BFC
     # Supports TEXMAP commands
 
-    # Output Data
+    # Determine if root
     if output is None:
+        isTop=True
+    else:
+        isTop=False
+    
+    # Output Data
+    if isTop:
         output = {}
         # All output data is structured in numpy arrays
         output["faceQuads"] = [] # single bit to flag if the next indicies are tris or quads, if 1 means next 4 points are one face, if 0 next 3 points
@@ -60,11 +66,11 @@ def parsePart(file,col=16,matrix=np.eye(4),flip=False,output=None,parentTex=None
         output["faceTex"] = [] # index of texture map each face is using, -1 for none. Maps into "textures" list
         output["textures"] = [] # list of filepaths for textures
         output["connectors"] = [] # Array of dictionaries containg snap info
-
-    # Connector support
-    newConnectors = parseConnectors(file,matrix)
-    if newConnectors:
-        output["connectors"].extend(newConnectors)
+        output["_snapRoot"] = np.linalg.inv(matrix) # strips the root matrix back out of snaps
+ 
+    # Connector support: snaps inherited from subfiles land after this index,
+    # then this file's own shadow info is applied at the end
+    snapStart = len(output["connectors"])
 
     # TEXMAP Data
     texStack = []
@@ -183,31 +189,10 @@ def parsePart(file,col=16,matrix=np.eye(4),flip=False,output=None,parentTex=None
                 # Ignored Command types
                 pass
 
+    snapping.applyShadow(file, matrix, output, snapStart)
+ 
+    if isTop:
+        output["connectors"] = snapping.dedupe(output["connectors"])
+        del output["_snapRoot"]
+
     return output
-
-def parseConnectors(partFile,matrix):
-    file = library.resolveShadowPart(partFile)
-    if not file:
-        return []
-
-    with open(file,"r",encoding="utf-8-sig") as f:
-        lines = f.readlines()
-
-    for l in lines:
-        if not l.strip(): # Blank lines allowed
-            continue
-        l = l.lstrip().strip("\n") # Remove leading whitespace, allowed in specification
-        lType = int(l[0]) # Integer defining the line type according to ldraw
-        lArgs = l[1:].lstrip().split()
-
-        if len(lArgs) < 2:
-            continue
-        if lType != 0:
-            continue
-        if lArgs[0] != "!LDCAD":
-            continue
-
-        print("SHADOW LIB DATA FOR:",Path(partFile).stem)
-        print(lArgs)
-
-        return []
