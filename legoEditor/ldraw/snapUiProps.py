@@ -70,7 +70,7 @@ def register():
     bpy.types.WindowManager.lego_show_snaps = bpy.props.BoolProperty(
         name="Show Snaps",
         description="Draw snap debug gizmos on selected bricks",
-        default=True,
+        default=False,
         update=_redrawViews,
         )
 
