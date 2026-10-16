@@ -143,11 +143,11 @@ class LEGO_PT_panel(bpy.types.Panel):
         layout.operator("lego.editor_toggle",
                              text="Exit LEGO Editor" if active else "Enter LEGO Editor",
                              depress=active)
+        layout.prop(wm,"brick_id")
+        layout.operator("lego.import_brick")
+        layout.operator("lego.import_random")
         if active:
-            layout.label(text="Magic is real")
-            layout.prop(wm,"brick_id")
-            layout.operator("lego.import_brick")
-            layout.operator("lego.import_random")
+            layout.label(text="magic is real")
 
 classes = (LEGO_OT_editorToggle, LEGO_PT_panel)
 

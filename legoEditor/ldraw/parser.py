@@ -1,10 +1,49 @@
 import numpy as np
+import shlex
 from pathlib import Path
 
-#from . import library, textures
-import library, textures
+from . import library, textures
 
-def parsePart(file,col=16,matrix=np.eye(4),flip=False,output=None,activeTex={}):
+def buildFace(lArgs, nVerts, col, matrix, reverse, tex, output):
+    # Build a triangle (nVerts=3) or quad (nVerts=4) from a type 3 or 4 line
+    colCode = int(lArgs[0])
+    if colCode == 16:
+        colCode = col  # inherit from parent
+
+    # Shape points as a 2D array of [x,y,z],[x2,y2,z2]...
+    newPoints = np.array(lArgs[1:1 + nVerts * 3], dtype=np.float64).reshape(nVerts, 3)
+    newPoints = newPoints @ matrix[:3, :3].T + matrix[:3, 3]  # Transform by parent matrix
+
+    if reverse:
+        newPoints = newPoints[::-1]
+
+    output["faceQuads"].append(True if nVerts == 4 else False)
+    output["points"].extend(newPoints.astype(np.float32).ravel())
+    output["faceCols"].append(colCode)
+
+    # UVs, computed on the final (possibly reversed) points so they stay paired
+    uvPoints = None
+    if tex:
+        projType = tex["projType"]
+        projParams = tex["projParams"]
+        if projType == "PLANAR":
+            uvPoints = textures.planarUvMap(newPoints, projParams)
+        elif projType == "CYLINDRICAL":
+            uvPoints = textures.cylinderUvMap(newPoints, projParams)
+        elif projType == "SPHERICAL":
+            uvPoints = textures.sphericalUvMap(newPoints, projParams)
+        else:
+            print(f"LDRAW PARSER: WARNING, Unrecognized projection type: '{projType}'")
+
+    if uvPoints is None:
+        # Untextured or failed: pad so faceUvs stays aligned with points
+        output["faceUvs"].extend([0.0] * (2 * nVerts))
+        output["faceTex"].append(-1)
+    else:
+        output["faceUvs"].extend(np.asarray(uvPoints, dtype=np.float32).ravel())
+        output["faceTex"].append(tex["texIndex"])
+
+def parsePart(file,col=16,matrix=np.eye(4),flip=False,output=None,parentTex=None):
     # Returns all mesh/texture files given a file path input
     # Expects file is formatted according to ldraw standards
     # Supports winding order/BFC
@@ -20,17 +59,25 @@ def parsePart(file,col=16,matrix=np.eye(4),flip=False,output=None,activeTex={}):
         output["faceUvs"] = [] # list of float32 UV coordinates for each face
         output["faceTex"] = [] # index of texture map each face is using, -1 for none. Maps into "textures" list
         output["textures"] = [] # list of filepaths for textures
+        output["connectors"] = [] # Array of dictionaries containg snap info
 
-    # Texture Data
+    # Connector support
+    newConnectors = parseConnectors(file,matrix)
+    if newConnectors:
+        output["connectors"].extend(newConnectors)
+
+    # TEXMAP Data
+    texStack = []
+    nextTex = None # set by NEXT, cleared after the next geometry line
     inTexFallback = False # Track if we are in a texture fallback block
 
-    with open(file,"r",encoding="utf-8") as f:
-        lines = f.readlines()
-
-
+    # BFC Data
     isMirrored = np.linalg.det(matrix[:3, :3]) < 0
     cw = False # Clockwise winding order from file
     invertNext = False # Track if we are inverting the next section
+
+    with open(file,"r",encoding="utf-8-sig") as f:
+        lines = f.readlines()
 
     for l in lines:
         if not l.strip(): # Blank lines allowed
@@ -42,15 +89,21 @@ def parsePart(file,col=16,matrix=np.eye(4),flip=False,output=None,activeTex={}):
         if not lArgs:
             continue
 
+        pendingNext = nextTex
+        nextTex = None
+
         if inTexFallback and not (lType == 0 and lArgs[:2] == ["!TEXMAP", "END"]):
             continue # Skip TEXMAP fallback block unless at the end of it
 
         # "0 !:" -> unwrap and treat as a normal line
         if lType == 0 and lArgs[0] == "!:":
+            if len(lArgs) < 2:
+                continue
             l = " ".join(lArgs[1:])
             lType = int(l[0])
             lArgs = l[1:].split()
-            print(l)
+
+        activeTex = pendingNext or (texStack[-1] if texStack else None) or parentTex
 
         match lType:
             case 0:
@@ -72,43 +125,29 @@ def parsePart(file,col=16,matrix=np.eye(4),flip=False,output=None,activeTex={}):
                 
                 # !TEXMAP Language extension support
                 elif leadingArg == "!TEXMAP":
-                    if len(lArgs) < 2:
+                    try:
+                        # posix=False keeps backslashes in Windows paths intact.
+                        tArgs = shlex.split(l[1:], posix=False)
+                    except ValueError:
+                        print(f"LDRAW PARSER: WARNING, Malformed TEXMAP line: '{l}'")
                         continue
-                    if lArgs[1] == "START": 
-                        print(l)
-                        uvMapType = lArgs[2]
-                        if uvMapType == "PLANAR":
-                            uvMapParams = np.array(lArgs[3:12], dtype=np.float64)
-                            pngName = lArgs[12]
-                        elif uvMapType == "CYLINDRICAL":
-                            uvMapParams = np.array(lArgs[3:13], dtype=np.float64)
-                            pngName = lArgs[13]
-                        elif uvMapType == "SPHERICAL":
-                            uvMapParams = np.array(lArgs[3:14], dtype=np.float64)
-                            pngName = lArgs[14]
-                        else:
-                            print(f"LDRAW PARSER: WARNING, Unrecogonized uv map format '{uvMapType}'")
-                            continue
 
-                        resolvedTex = textures.loadTexture(pngName)
-                        if not resolvedTex:
-                            print(f"LDRAW PARSER: WARNING, Could not find texture '{pngName}'")
-                            continue
-                        resolvedTex = str(resolvedTex)
-                        if resolvedTex not in output["textures"]:
-                            # add it!
-                            output["textures"].append(resolvedTex)
-                            texIndex = len(output["textures"])
+                    if len(tArgs) < 2:
+                        continue
 
-                        activeTex["projectionParams"] = uvMapParams
-                        activeTex["texIndex"] = texIndex
-
-                    elif lArgs[1] == "NEXT":
-                        pass
-                    elif lArgs[1] == "FALLBACK":
+                    if tArgs[1] == "START": 
+                        texStack.append(textures.parseTexmap(tArgs[2:], matrix, output, str(Path(file).parent)))
+                    elif tArgs[1] == "NEXT":
+                        nextTex = textures.parseTexmap(tArgs[2:], matrix, output, str(Path(file).parent))
+                    elif tArgs[1] == "FALLBACK":
                         inTexFallback = True
-                    elif lArgs[1] == "END":
+                    elif tArgs[1] == "END":
+                        if texStack: # END without a START in this file has no effect
+                            texStack.pop()
                         inTexFallback = False
+                        
+                elif leadingArg == "STEP":
+                    texStack.clear()
 
                 # !COLOUR Language extension support
                 elif leadingArg == "!COLOUR":
@@ -132,47 +171,43 @@ def parsePart(file,col=16,matrix=np.eye(4),flip=False,output=None,activeTex={}):
                     print(f"LDRAW PARSER: WARNING, Part could not be found: '{relPath}'")
                 else:
                     actuallyFlip = flip ^ invertNext
-                    parsePart(str(absPath),colCode,matrix @ incMatrix,actuallyFlip,output)
+                    parsePart(str(absPath),colCode,matrix @ incMatrix,actuallyFlip,output,activeTex)
                 invertNext = False
 
-            case 3:
-                # build a triangle
-                colCode = int(lArgs[0])
-                if colCode == 16:
-                    colCode = col  # inherit from parent
-                # Shape points as a 2d Array of [x,y,z],[x2,y2,z2]
-                newPoints = np.array(lArgs[1:10], dtype=np.float64).reshape(3, 3)
-                newPoints = newPoints @ matrix[:3, :3].T + matrix[:3, 3] # Transform by parent matrix
-
-                if cw ^ flip ^ isMirrored:
-                    newPoints = newPoints[::-1]
-
-                output["faceQuads"].append(0)
-                output["points"].extend(newPoints.astype(np.float32).ravel())
-                output["faceCols"].append(colCode)
-
-            case 4:
-                # build a quad
-                colCode = int(lArgs[0])
-                if colCode == 16:
-                    colCode = col  # inherit from parent
-                # Shape points as a 2d Array of [x,y,z],[x2,y2,z2]
-                newPoints = np.array(lArgs[1:13], dtype=np.float64).reshape(4, 3)
-                newPoints = newPoints @ matrix[:3, :3].T + matrix[:3, 3] # Transform by parent matrix
-
-                if cw ^ flip ^ isMirrored:
-                    newPoints = newPoints[::-1]
-
-                output["faceQuads"].append(1)
-                output["points"].extend(newPoints.astype(np.float32).ravel())
-                output["faceCols"].append(colCode)
+            case 3 | 4:
+                nVerts = 3 if lType == 3 else 4
+                # This function mutates the output dict
+                buildFace(lArgs, nVerts, col, matrix, cw ^ flip ^ isMirrored, activeTex, output)
 
             case 2 | 5:
                 # Ignored Command types
-                continue
+                pass
 
     return output
 
-library.setPartLibrary(r"C:\Users\Josh\Downloads\complete\ldraw")
-#parsePart(r"C:\Users\Josh\Downloads\complete\ldraw\parts\3001.dat")
-parsePart(r"C:\Users\Josh\Downloads\complete\ldraw\parts\191764.dat")
+def parseConnectors(partFile,matrix):
+    file = library.resolveShadowPart(partFile)
+    if not file:
+        return []
+
+    with open(file,"r",encoding="utf-8-sig") as f:
+        lines = f.readlines()
+
+    for l in lines:
+        if not l.strip(): # Blank lines allowed
+            continue
+        l = l.lstrip().strip("\n") # Remove leading whitespace, allowed in specification
+        lType = int(l[0]) # Integer defining the line type according to ldraw
+        lArgs = l[1:].lstrip().split()
+
+        if len(lArgs) < 2:
+            continue
+        if lType != 0:
+            continue
+        if lArgs[0] != "!LDCAD":
+            continue
+
+        print("SHADOW LIB DATA FOR:",Path(partFile).stem)
+        print(lArgs)
+
+        return []

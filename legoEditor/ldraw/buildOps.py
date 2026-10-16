@@ -4,7 +4,9 @@ import time
 import random
 from pathlib import Path
 
-from . import brickBuilder, datParser
+from . import importer, library
+
+brickIds = []
 
 class LEGO_OT_ImportRandom(bpy.types.Operator):
     bl_idname = "lego.import_random"
@@ -24,17 +26,18 @@ class LEGO_OT_ImportRandom(bpy.types.Operator):
             self.report({'ERROR'},"No 'parts' subdirectory found in piece library")
             return {'CANCELLED'}
 
-        brickIds = [f.stem for f in partsPath.iterdir() if f.is_file() and f.suffix.lower() == ".dat" and f.stem.isdigit()]
+        global brickIds
+        if not brickIds:
+            brickIds = [f.stem for f in partsPath.iterdir() if f.is_file() and f.suffix.lower() == ".dat" and f.stem.isdigit()]
 
         if not brickIds:
             self.report({'ERROR'},"No .dat files found in piece library parts subdir")
             return {'CANCELLED'}
 
         brickId = random.choice(brickIds)
-        datParser.libraryDir = pieceLibrary
-        datParser.shadowDir = shadowLibrary
-        brickBuilder.brickSf = sf
-        obj = brickBuilder.makeBrick(brickId)
+        library.setPartLibrary(pieceLibrary)
+        library.setShadowLibrary(shadowLibrary)
+        obj = importer.makeBrick(brickId)
         if obj:
             duration = round(time.perf_counter() - start,4)*1000
             self.report({'INFO'},f"Brick built in {duration}ms")
@@ -56,14 +59,13 @@ class LEGO_OT_ImportBrick(bpy.types.Operator):
         pieceLibrary = bpy.context.preferences.addons[__package__.rpartition(".")[0]].preferences.pieceLibrary
         shadowLibrary = bpy.context.preferences.addons[__package__.rpartition(".")[0]].preferences.shadowLibrary
         sf = bpy.context.preferences.addons[__package__.rpartition(".")[0]].preferences.scaleFactor
-        brickBuilder.brickSf = sf
         if not brickId:
             self.report({'WARNING'},"Please provide a brick ID")
             return {'CANCELLED'}
 
-        datParser.libraryDir = pieceLibrary
-        datParser.shadowDir = shadowLibrary
-        obj = brickBuilder.makeBrick(brickId)
+        library.setPartLibrary(pieceLibrary)
+        library.setShadowLibrary(shadowLibrary)
+        obj = importer.makeBrick(brickId)
         if obj:
             duration = round(time.perf_counter() - start,4)*1000
             self.report({'INFO'},f"Brick built in {duration}ms")
