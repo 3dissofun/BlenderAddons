@@ -1,13 +1,14 @@
 from pathlib import Path
+import json
 
-try:
-    from . import library
-except:
-    import library
+from . import library
 
 FINISH_KEYWORDS = ("CHROME", "PEARLESCENT", "METAL", "RUBBER")
- 
+
+colMap = None # In memory representation of parsed data
+
 def buildColMap():
+    global colMap
     partLib = library.getPartLibrary()
     if not partLib:
         print("LDRAW COLMAP: ERROR, No part library set")
@@ -37,13 +38,16 @@ def buildColMap():
  
         # !COLOUR <name> CODE <n> VALUE <#hex> EDGE <#hex> [ALPHA n] [LUMINANCE n] [finish] [MATERIAL ...]
         colName = lArgs[1]
-        colCode = int(lArgs[3])
+        colCode = lArgs[3]
         hexVal = lArgs[5]
  
         entry = {"name": colName, "col": hexVal}
  
         if "ALPHA" in lArgs:
             entry["alpha"] = int(lArgs[lArgs.index("ALPHA") + 1])
+
+        if "LUMINANCE" in lArgs:
+            entry["luminance"] = int(lArgs[lArgs.index("LUMINANCE") + 1])
  
         # Finish: a bare keyword (CHROME, PEARLESCENT, METAL, RUBBER), else the
         # MATERIAL type (GLITTER, SPECKLE, FABRIC), else plain SOLID.
@@ -55,10 +59,36 @@ def buildColMap():
  
         outputData[colCode] = entry
  
-    return outputData
+    outFile = Path(partLib) / "colMap.json"
+    with open(outFile, "w", encoding="utf-8") as f:
+        json.dump(outputData, f, indent=1)
 
-library.setPartLibrary(r"C:\Users\Josh\Downloads\complete\ldraw")
-data = buildColMap()
+    colMap = outputData
+    return True
 
-for k,v in data.items():
-    print(f"{k}:{v}")
+def getColMap(rebuild=False):
+    global colMap
+    # Check memory first
+    if colMap and (not rebuild):
+        return colMap
+
+    # Then cache
+    partLib = library.getPartLibrary()
+    if partLib:
+        cacheFile = Path(partLib) / "colMap.json"
+        if cacheFile.exists() and (not rebuild):
+            with open(str(cacheFile), "r", encoding="utf-8") as f:
+                data = json.load(f)
+            colMap = data
+            return data
+    
+    # Then build
+    success = buildColMap()
+    if not success:
+        print("LDRAW COLMAP: ERROR, Error building color map")
+        return None
+    return colMap
+
+def clrColMap():
+    global colMap
+    colMap = None

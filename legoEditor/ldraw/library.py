@@ -124,3 +124,8 @@ def clearCaches():
         snapping.clearCaches()
     except ImportError:
         pass
+    try:
+       from . import colors
+       colors.clrColMap()
+   except ImportError:
+       pass
