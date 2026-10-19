@@ -1,4 +1,6 @@
 import bpy
+from bpy.props import StringProperty
+from bpy_extras.io_utils import ImportHelper
 
 import time
 import random
@@ -111,17 +113,34 @@ class LEGO_OT_DebugSnaps(bpy.types.Operator):
         self.report({'INFO'}, f"Printed {len(snaps)} snaps to console")
         return {'FINISHED'}
 
-classes = (LEGO_OT_ImportBrick, LEGO_OT_ImportRandom, LEGO_OT_DebugSnaps)
+class LEGO_OT_ImportLdr(bpy.types.Operator, ImportHelper):
+    bl_idname = "lego.import_ldr"
+    bl_label = "Import LDR"
+    bl_description = "Import a lego (.ldr/.mpd) model"
+    bl_options = {'REGISTER','UNDO'}
 
-def menuDebugSnaps(self, context):
-    self.layout.operator(LEGO_OT_DebugSnaps.bl_idname)
+    filename_ext = ".ldr"
+    filter_glob: StringProperty(default="*.ldr;*.mpd", options={'HIDDEN'})
+
+    def execute(self, context):
+        name = Path(self.filepath).stem
+        coll = bpy.data.collections.new(name)
+        context.scene.collection.children.link(coll)
+        objs = importer.importLdr(self.filepath, coll)
+        self.report({'INFO'}, f"Imported {len(objs)} bricks into '{coll.name}'")
+        return {'FINISHED'}
+
+classes = (LEGO_OT_ImportBrick, LEGO_OT_ImportRandom, LEGO_OT_DebugSnaps, LEGO_OT_ImportLdr)
+
+def importMenu(self, context):
+    self.layout.operator(LEGO_OT_ImportLdr.bl_idname, text="LEGO LDR file (.ldr)")
 
 def register():
     for c in classes:
         bpy.utils.register_class(c)
-    bpy.types.VIEW3D_MT_object.append(menuDebugSnaps)
+    bpy.types.TOPBAR_MT_file_import.append(importMenu)
 
 def unregister():
-    bpy.types.VIEW3D_MT_object.remove(menuDebugSnaps)
+    bpy.types.TOPBAR_MT_file_import.remove(importMenu)
     for c in reversed(classes):
         bpy.utils.unregister_class(c)

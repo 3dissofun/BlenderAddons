@@ -2,11 +2,11 @@ import numpy as np
 import shlex
 from pathlib import Path
 
-from . import library, textures, snapping
+from . import library, textures, snapping, colors
 
 def buildFace(lArgs, nVerts, col, matrix, reverse, tex, output):
     # Build a triangle (nVerts=3) or quad (nVerts=4) from a type 3 or 4 line
-    colCode = int(lArgs[0])
+    colCode = colors.parseCol(lArgs[0])
     if colCode == 16:
         colCode = col  # inherit from parent
 
@@ -161,7 +161,7 @@ def parsePart(file,col=16,matrix=np.eye(4),flip=False,output=None,parentTex=None
 
             case 1:
                 # include another file
-                colCode = int(lArgs[0])
+                colCode = colors.parseCol(lArgs[0])
                 if colCode == 16:
                     colCode = col  # inherit from parent
                 x, y, z, a, b, c, d, e, f, g, h, i = (float(v) for v in lArgs[1:13])

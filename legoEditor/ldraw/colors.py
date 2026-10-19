@@ -7,6 +7,14 @@ FINISH_KEYWORDS = ("CHROME", "PEARLESCENT", "METAL", "RUBBER")
 
 colMap = None # In memory representation of parsed data
 
+def parseCol(rawCode):
+    try:
+        colCode = int(rawCode)
+    except ValueError:
+        print(f"LDRAW PARSER: WARNING, Direct colors not implemented, skipping '{rawCode}', using 16")
+        colCode = 16
+    return colCode
+
 def buildColMap():
     global colMap
     partLib = library.getPartLibrary()

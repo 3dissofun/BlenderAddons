@@ -10,14 +10,19 @@ bl_info = {
     "category": "Modelling",
 }
 
-from . import ldraw, props, uiOverhaul
+from . import ldraw, ldd, props, uiOverhaul
 
 def register():
     props.register()
     ldraw.register()
+    ldd.register()
     uiOverhaul.register()
+    
+    ldraw.library.setPartLibrary(r"C:\Users\Josh\Downloads\complete\ldraw")
+    ldraw.library.setShadowLibrary(r"C:\Users\Josh\Downloads\LDCadShadowLibrary-main\LDCadShadowLibrary-main")
 
 def unregister():
+    ldd.unregister()
     ldraw.unregister()
     uiOverhaul.unregister()
     props.unregister()

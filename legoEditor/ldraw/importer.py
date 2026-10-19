@@ -1,6 +1,11 @@
 import bpy
 import bmesh
+
 import numpy as np
+from mathutils import Matrix
+from pathlib import Path
+import json
+import tempfile
 
 from . import parser, library
 
@@ -138,7 +143,9 @@ def makeBrick(brickId, colId=16, mergeVerts=True, forceNew=True):
     meshName = f"{brickId}_{colId}"
     mesh = bpy.data.meshes.get(meshName)
     if mesh and not forceNew:
-        return bpy.data.objects.new(brickId, mesh)
+        newObj = bpy.data.objects.new(brickId, mesh)
+        newObj.is_lego = True
+        return newObj
 
     relPath = brickId if brickId.lower().endswith((".dat", ".ldr")) else brickId + ".dat"
     partPath = library.resolvePart(relPath)
@@ -197,3 +204,83 @@ def makeBrick(brickId, colId=16, mergeVerts=True, forceNew=True):
     mesh.validate()
     mesh.update()
     return obj
+
+# MODELS/ MULTI BRICK IMPORTS
+
+def _readModels(path):
+    # {model name (lowercase): [lines]}. The first entry is the main model.
+    # A plain .ldr (no "0 FILE" lines) becomes a single model.
+    default = Path(path).name.lower()
+    models, cur = {default: []}, default
+    with open(path, encoding="utf-8-sig") as fh:
+        for raw in fh:
+            line = raw.strip()
+            t = line.split(maxsplit=2)
+            if t[:2] == ["0", "FILE"] and len(t) > 2:
+                if not models.get(default):
+                    models.pop(default, None)   # nothing came before the first FILE
+                cur = t[2].strip().lower().replace("\\", "/")
+                models[cur] = []
+            elif t[:2] == ["0", "NOFILE"]:
+                cur = None
+            elif cur is not None and line:
+                models[cur].append(line)
+    return models
+
+def _placements(models, name, parent=None, parentCol=16, depth=0):
+    # Yields (part name, colour, 4x4 LDraw matrix), with sub-models expanded
+    parent = np.eye(4) if parent is None else parent
+    for line in models[name]:
+        t = line.split()
+        if len(t) < 15 or t[0] != "1":
+            continue
+        col = int(t[1])
+        col = parentCol if col == 16 else col        # 16 inherits from the parent
+        x, y, z, a, b, c, d, e, f, g, h, i = map(float, t[2:14])
+        m = parent @ np.array([[a, b, c, x], [d, e, f, y], [g, h, i, z], [0, 0, 0, 1]])
+        ref = " ".join(t[14:]).lower().replace("\\", "/")
+        if ref in models and depth < 32:             # sub-model defined in this file
+            yield from _placements(models, ref, m, col, depth + 1)
+        else:                                        # library part
+            yield ref, col, m
+
+PART_TYPES = {"part", "subpart", "primitive", "8_primitive", "48_primitive", "shortcut"}
+
+def _isPart(lines):
+    # An MPD block is an embedded part (not a sub-model) if its header says so,
+    # or failing that, if it contains geometry
+    for line in lines:
+        t = line.split()
+        if t[:2] == ["0", "!LDRAW_ORG"] and len(t) > 2:
+            return t[2].lower().removeprefix("unofficial_") in PART_TYPES
+        if t and t[0] in ("2", "3", "4", "5"):
+            return True
+    return False
+
+def importLdr(ldrPath, collection):
+    fromBl = np.linalg.inv(LD_TO_BL)
+    models = _readModels(ldrPath)
+    if not any(models.values()):
+        return []
+    main = next(iter(models))
+    parts = {n: ls for n, ls in models.items() if n != main and _isPart(ls)}
+    subModels = {n: ls for n, ls in models.items() if n not in parts}
+
+    objs = []
+    with tempfile.TemporaryDirectory() as tmp:
+        for name, lines in parts.items():
+            p = Path(tmp) / name                      # keeps s/, 48/ etc.
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        library.setOverlay(tmp)
+        try:
+            for ref, col, m in _placements(subModels, main):
+                obj = makeBrick(ref, colId=col, forceNew=False)
+                if obj is None:
+                    continue
+                obj.matrix_world = Matrix((LD_TO_BL @ m @ fromBl).tolist())
+                collection.objects.link(obj)
+                objs.append(obj)
+        finally:
+            library.setOverlay(None)
+    return objs
