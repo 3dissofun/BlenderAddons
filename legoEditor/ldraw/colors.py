@@ -67,7 +67,7 @@ def buildColMap():
  
         outputData[colCode] = entry
  
-    outFile = Path(partLib) / "colMap.json"
+    outFile = Path(__file__).parent / "colMap.json"
     with open(outFile, "w", encoding="utf-8") as f:
         json.dump(outputData, f, indent=1)
 
@@ -83,7 +83,7 @@ def getColMap(rebuild=False):
     # Then cache
     partLib = library.getPartLibrary()
     if partLib:
-        cacheFile = Path(partLib) / "colMap.json"
+        cacheFile = Path(__file__).parent  / "colMap.json"
         if cacheFile.exists() and (not rebuild):
             with open(str(cacheFile), "r", encoding="utf-8") as f:
                 data = json.load(f)

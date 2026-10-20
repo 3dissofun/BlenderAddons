@@ -19,26 +19,39 @@ class LEGO_OT_ImportRandom(bpy.types.Operator):
         start = time.perf_counter()
         wm = bpy.context.window_manager
 
-        pieceLibrary = bpy.context.preferences.addons[__package__.rpartition(".")[0]].preferences.pieceLibrary
-        shadowLibrary = bpy.context.preferences.addons[__package__.rpartition(".")[0]].preferences.shadowLibrary
         sf = bpy.context.preferences.addons[__package__.rpartition(".")[0]].preferences.scaleFactor
-
-        partsPath = Path(pieceLibrary) / "parts"
+        partsPath = Path(library.getPartLibrary()) / "parts"
         if not partsPath.exists():
             self.report({'ERROR'},"No 'parts' subdirectory found in piece library")
             return {'CANCELLED'}
 
+        
         global brickIds
         if not brickIds:
-            brickIds = [f.stem for f in partsPath.iterdir() if f.is_file() and f.suffix.lower() == ".dat" and f.stem.isdigit()]
+            ranCatalog = partsPath / "catalogRandom.txt"
 
-        if not brickIds:
-            self.report({'ERROR'},"No .dat files found in piece library parts subdir")
-            return {'CANCELLED'}
+            # 1. try the cached catalog on disk
+            if ranCatalog.is_file():
+                try:
+                    lines = ranCatalog.read_text(encoding="utf-8").splitlines()
+                    brickIds = [l.strip() for l in lines if l.strip()]
+                except OSError as e:
+                    print(f"LEGO: could not read {ranCatalog}: {e}")
+
+            # 2. no cache (or empty/unreadable): scan the parts folder and save the result
+            if not brickIds:
+                brickIds = [f.stem for f in partsPath.iterdir() if f.is_file() and f.suffix.lower() == ".dat" and f.stem.isdigit()]
+                if not brickIds:
+                    self.report({'ERROR'},"No .dat files found in piece library parts subdir")
+                    return {'CANCELLED'}
+                try:
+                    ranCatalog.write_text("\n".join(brickIds), encoding="utf-8")
+                except OSError as e:
+                    # read-only library etc: still works this session, just not cached
+                    print(f"LEGO: could not write {ranCatalog}: {e}")
+
 
         brickId = random.choice(brickIds)
-        library.setPartLibrary(pieceLibrary)
-        library.setShadowLibrary(shadowLibrary)
         obj = importer.makeBrick(brickId)
         if obj:
             duration = round(time.perf_counter() - start,4)*1000
@@ -58,15 +71,11 @@ class LEGO_OT_ImportBrick(bpy.types.Operator):
         start = time.perf_counter()
         wm = bpy.context.window_manager
         brickId = wm.brick_id
-        pieceLibrary = bpy.context.preferences.addons[__package__.rpartition(".")[0]].preferences.pieceLibrary
-        shadowLibrary = bpy.context.preferences.addons[__package__.rpartition(".")[0]].preferences.shadowLibrary
         sf = bpy.context.preferences.addons[__package__.rpartition(".")[0]].preferences.scaleFactor
         if not brickId:
             self.report({'WARNING'},"Please provide a brick ID")
             return {'CANCELLED'}
 
-        library.setPartLibrary(pieceLibrary)
-        library.setShadowLibrary(shadowLibrary)
         obj = importer.makeBrick(brickId)
         if obj:
             duration = round(time.perf_counter() - start,4)*1000
