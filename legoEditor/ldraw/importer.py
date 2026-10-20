@@ -9,8 +9,8 @@ import tempfile
 
 from . import parser, library
 
-BRICK_SF = 0.02                    # LDraw units -> metres
-MERGE_DIST = 0.05 * BRICK_SF       # merge-by-distance threshold, in Blender units
+BRICK_SF = 0.0004 # CONFRIMED REAL SCALE
+MERGE_DIST = 0.05 * BRICK_SF # merge-by-distance threshold, in Blender units
 
 SHADER_FILE = Path(__file__).parent / "shaders.blend"
 SHADER_GROUP = "LEGO_SN"

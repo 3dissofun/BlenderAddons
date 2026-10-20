@@ -18,7 +18,7 @@ from mathutils import Matrix
 
 MALE_COL = (0.15, 0.45, 1.0)
 FEMALE_COL = (1.0, 0.2, 0.2)
-MIN_CROSS = 0.04  # Blender units, for snaps with no radius
+MIN_CROSS = 0.04 * 0.0004  # Blender units, for snaps with no radius
 
 CROSS = "VIEW3D_GT_lego_cross"
 LINE = "VIEW3D_GT_lego_line"
