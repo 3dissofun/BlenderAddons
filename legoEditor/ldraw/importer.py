@@ -9,22 +9,30 @@ import tempfile
 
 from . import parser, library
 
-BRICK_SF = 0.02                    # LDraw units -> metres
-MERGE_DIST = 0.05 * BRICK_SF       # merge-by-distance threshold, in Blender units
-
 SHADER_FILE = Path(__file__).parent / "shaders.blend"
 SHADER_GROUP = "LEGO_SN"
 
-# LDraw -> Blender axes (x, z, -y), scaled to real-world size. Passed to the parser
-# as the root matrix so points come out already in Blender space.
-LD_TO_BL = np.array([
+# LDraw -> Blender axes (x, z, -y). Scaled copy lives in LD_TO_BL.
+LD_AXES = np.array([
     [1, 0,  0, 0],
     [0, 0,  1, 0],
     [0, -1, 0, 0],
     [0, 0,  0, 1],
 ], dtype=np.float64)
-LD_TO_BL[:3, :3] *= BRICK_SF
 
+BRICK_SF = 0.02
+MERGE_DIST = 0.05 * BRICK_SF
+LD_TO_BL = None
+
+def setScale(sf):
+    # LDraw units -> Blender units. Rebuilds everything derived from the scale.
+    global BRICK_SF, MERGE_DIST, LD_TO_BL
+    BRICK_SF = sf
+    MERGE_DIST = 0.05 * sf
+    LD_TO_BL = LD_AXES.copy()
+    LD_TO_BL[:3, :3] *= sf
+
+setScale(BRICK_SF)
 # ---------------------------------------------------------------------------
 # Snaps
 # ---------------------------------------------------------------------------

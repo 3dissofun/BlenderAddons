@@ -20,7 +20,11 @@ class LEGO_OT_ImportRandom(bpy.types.Operator):
         wm = bpy.context.window_manager
 
         sf = bpy.context.preferences.addons[__package__.rpartition(".")[0]].preferences.scaleFactor
-        partsPath = Path(library.getPartLibrary()) / "parts"
+        libPath = library.getPartLibrary()
+        if libPath is None:
+            self.report({'WARNING'},"No piece library set!")
+            return {'CANCELLED'}
+        partsPath = Path(libPath) / "parts"
         if not partsPath.exists():
             self.report({'ERROR'},"No 'parts' subdirectory found in piece library")
             return {'CANCELLED'}

@@ -1,8 +1,9 @@
 from pathlib import Path
 from functools import lru_cache
 
-partLib = None
-shadowLib = None
+import bpy
+
+addonName = __package__.rpartition(".")[0]
 overlayDir = None  # folder of files unpacked from an MPD, searched first
 
 # ---------------------------------------------------------------------------
@@ -12,18 +13,9 @@ overlayDir = None  # folder of files unpacked from an MPD, searched first
 def validatePath(path):
     cleanPath = Path(path).expanduser().resolve()
     if not cleanPath.is_dir():
-        raise FileNotFoundError(f"Path '{cleanPath}' is not a directory.")
+        print(f"LDRAW LIBRARY: WARNING, Path '{cleanPath}' is not a directory.")
+        return None
     return cleanPath
-
-def setPartLibrary(newPath):
-    global partLib
-    partLib = validatePath(newPath)
-    clearCaches()
-
-def setShadowLibrary(newPath):
-    global shadowLib
-    shadowLib = validatePath(newPath)
-    clearCaches()
 
 def setOverlay(path):
     # Point at a folder of files unpacked from an MPD (or None to remove it).
@@ -33,13 +25,19 @@ def setOverlay(path):
     clearCaches()
 
 def getPartLibrary():
-    if partLib is None:
+    prefPath = bpy.context.preferences.addons[addonName].preferences.pieceLibrary
+    if not prefPath:
         print("LDRAW LIBRARY: WARNING, No part library set")
+        return None
+    partLib = validatePath(bpy.path.abspath(prefPath))
     return partLib
 
 def getShadowLibrary():
-    if shadowLib is None:
+    prefPath = bpy.context.preferences.addons[addonName].preferences.shadowLibrary
+    if not prefPath:
         print("LDRAW LIBRARY: WARNING, No shadow library set")
+        return None
+    shadowLib = validatePath(bpy.path.abspath(prefPath))
     return shadowLib
 
 def getOverlay():
@@ -85,9 +83,9 @@ def resolveTexture(name, fileDir=None):
         bases.append(Path(fileDir))  # folder of the file being parsed
     if overlayDir and overlayDir not in bases:
         bases.append(overlayDir)     # !DATA blocks unpacked from an MPD
-    if partLib:
-        bases += [partLib / "parts", partLib / "p", partLib / "models"]
-
+    root = getPartLibrary()
+    if root:
+        bases += [root / "parts", root / "p", root / "models"]
     # Spec: try "textures/<name>" across the whole search path,
     # then repeat without the prefix
     for rel in ("textures/" + name, name):
