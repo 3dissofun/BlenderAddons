@@ -10,7 +10,7 @@ def onSfChange(self,context):
 
 class LE_AddonPreferences(bpy.types.AddonPreferences):
     bl_idname = __package__
-    scaleFactor: FloatProperty(name="Scale Factor", default=0.02, update=onSfChange)
+    scaleFactor: FloatProperty(name="Scale Factor", default=0.0004, update=onSfChange)
     pieceLibrary: StringProperty(name="Piece Library",subtype='DIR_PATH',update=onLibChange)
     shadowLibrary: StringProperty(name="Shadow Library",subtype='DIR_PATH',update=onLibChange)
 
