@@ -6,6 +6,7 @@ def onLibChange(self,context):
     library.clearCaches()
 
 def onSfChange(self,context):
+    library.clearCaches()
     importer.setScale(self.scaleFactor)
 
 class LE_AddonPreferences(bpy.types.AddonPreferences):
