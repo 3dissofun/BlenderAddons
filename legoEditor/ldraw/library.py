@@ -1,11 +1,81 @@
 from pathlib import Path
 from functools import lru_cache
+import os
+import threading
 
 import bpy
 
 addonName = __package__.rpartition(".")[0]
 overlayDir = None  # folder of files unpacked from an MPD, searched first
 
+# ---------------------------------------------------------------------------
+# Indexing
+# ---------------------------------------------------------------------------
+
+buildThread = None # The thread building the index
+
+partIndex = None # In memory index, dynamically updated on path changes
+partList = []
+
+def startBackgroundBuild():
+    global buildThread
+    waitForBuild() # If one is running, let it finish
+    
+    buildThread = threading.Thread(target=buildPartIndex,name="LDrawIndex",daemon=True)
+    buildThread.start()
+
+def waitForBuild():
+    thread = buildThread
+    if (thread is not None and thread.is_alive and thread is not threading.current_thread()):
+        thread.join()
+
+def buildPartIndex():
+    global partIndex, partList
+    partIndex = {}
+    partList = []
+    partRoot = getPartLibrary()
+    if not partRoot:
+        return partIndex
+
+    for subdir in ("p","parts","models"):
+        base = partRoot / subdir
+        if not base.is_dir():
+            continue
+        baseStr = str(base)
+        
+        for dirPath, dirNames, fileNames in os.walk(baseStr):
+            for file in fileNames:
+                fullPath = os.path.join(dirPath,file)
+                relPath = os.path.relpath(fullPath,baseStr)
+                key = relPath.replace("\\","/").lower()
+                partIndex.setdefault(key,fullPath)
+
+                if subdir == "parts" and dirPath == baseStr and key.lower().endswith(".dat"):
+                    partList.append(key)
+    
+    partList.sort()
+    print(f"LDRAW LIBRARY: {len(partIndex)} part files indexed")
+    return partIndex
+
+def clearPartIndex():
+    global partIndex, partList
+    waitForBuild()
+    partIndex = None
+    partList = []
+
+def partIndexLookup(relPath):
+    # Return full path for a piece given a relative lookup
+    waitForBuild()
+    if partIndex is None:
+        buildPartIndex()
+    return partIndex.get(_normalise(relPath),None)
+
+def getAllParts():
+    waitForBuild()
+    if partIndex is None:
+        buildPartIndex()
+    return partList
+    
 # ---------------------------------------------------------------------------
 # Library roots
 # ---------------------------------------------------------------------------
@@ -50,25 +120,15 @@ def _normalise(relPath):
 # Parts
 # ---------------------------------------------------------------------------
 
-@lru_cache(maxsize=1)
-def getSearchDirs():
-    # Overlay first, then the official library. Empty if nothing is set.
-    dirs = []
-    if overlayDir:
-        dirs.append(overlayDir)
-    root = getPartLibrary()
-    if root:
-        dirs += [root / "p", root / "parts", root / "models"]
-    return tuple(dirs)
-
 @lru_cache(maxsize=None)
 def resolvePart(relPath):
     name = _normalise(relPath)
-    for base in getSearchDirs():
-        candidate = base / name
+    if overlayDir:
+        candidate = overlayDir / name
         if candidate.is_file():
             return candidate
-    return None
+    found = partIndexLookup(name)
+    return Path(found) if found else None
 
 # ---------------------------------------------------------------------------
 # Textures
@@ -116,6 +176,17 @@ def getShadowSearchDirs():
                 dirs.append(candidate)
     return tuple(dirs)
 
+@lru_cache(maxsize=1)
+def getSearchDirs():
+    # Overlay first, then the official library. Empty if nothing is set.
+    dirs = []
+    if overlayDir:
+        dirs.append(overlayDir)
+    root = getPartLibrary()
+    if root:
+        dirs += [root / "p", root / "parts", root / "models"]
+    return tuple(dirs)
+
 @lru_cache(maxsize=None)
 def resolveShadowPart(file):
     # Map a resolved part file to its shadow counterpart, or None.
@@ -157,8 +228,8 @@ def resolveShadowRef(relPath):
 # ---------------------------------------------------------------------------
 
 def clearCaches():
-    getSearchDirs.cache_clear()
     getShadowSearchDirs.cache_clear()
+    getSearchDirs.cache_clear()
     resolvePart.cache_clear()
     resolveShadowPart.cache_clear()
     resolveShadowRef.cache_clear()
