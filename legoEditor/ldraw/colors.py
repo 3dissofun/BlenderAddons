@@ -100,3 +100,17 @@ def getColMap(rebuild=False):
 def clrColMap():
     global colMap
     colMap = None
+
+def colFromCode(colCode):
+    code = parseCol(colCode)
+    if not colMap:
+        getColMap()
+    col = colMap.get(str(code),None)
+    if not col:
+        print(f"LDRAW COLMAP: WARNING, Color not found for code '{colCode}'")
+        return None
+    return col["col"]
+
+def hexToRgb(hexVal):
+    h = hexVal.lstrip("#")
+    return tuple(int(h[i:i + 2], 16) / 255.0 for i in (0, 2, 4))

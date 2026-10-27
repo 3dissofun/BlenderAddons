@@ -51,7 +51,7 @@ def storeSnaps(mesh, snaps):
     coll.clear()
     for s in snaps:
         item = coll.add()
-        item.kind = s.kind[5:]               # "SNAP_CYL" -> "CYL"
+        item.kind = s.kind[5:] # "SNAP_CYL" -> "CYL"
         item.gender = s.gender
         item.group = s.group
         item.ids = ",".join(sorted(s.ids))
@@ -218,8 +218,7 @@ def makeBrick(brickId, colId=16, mergeVerts=True, forceNew=True):
     # colId:    LDraw colour code substituted for faces using 16 (main colour)
     # forceNew: build a fresh mesh from source instead of reusing an existing one
 
-    # Colour 16 is baked into the attribute, so the cache key must include it
-    meshName = f"{brickId}_{colId}"
+    meshName = brickId
     mesh = bpy.data.meshes.get(meshName)
     if mesh and not forceNew:
         newObj = bpy.data.objects.new(brickId, mesh)
