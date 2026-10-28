@@ -1,3 +1,6 @@
+"""
+The intent of this file is to import an LDraw brick at LDU scale 1, so 1blender unit = 1 LDraw unit, scaling is handled outside of the ldraw editors scope
+"""
 import bpy
 import bmesh
 
@@ -7,42 +10,27 @@ from pathlib import Path
 import json
 import tempfile
 
-from . import parser, library
+from . import parser, library, colors
 
-SHADER_FILE = Path(__file__).parent / "shaders.blend"
+SHADER_FILE = Path(__file__).parent.parent / "external" / "shaders.blend"
 SHADER_GROUP = "LEGO_SN"
 
-# LDraw -> Blender axes (x, z, -y). Scaled copy lives in LD_TO_BL.
-LD_AXES = np.array([
+# LDraw -> Blender axes (x, z, -y)
+LD_TO_BL = np.array([
     [1, 0,  0, 0],
     [0, 0,  1, 0],
     [0, -1, 0, 0],
     [0, 0,  0, 1],
 ], dtype=np.float64)
 
-BRICK_SF = 0.02
-MERGE_DIST = 0.05 * BRICK_SF
-LD_TO_BL = None
 
-def setScale(sf):
-    # LDraw units -> Blender units. Rebuilds everything derived from the scale.
-    global BRICK_SF, MERGE_DIST, LD_TO_BL
-    BRICK_SF = sf
-    MERGE_DIST = 0.05 * sf
-    LD_TO_BL = LD_AXES.copy()
-    LD_TO_BL[:3, :3] *= sf
-
-setScale(BRICK_SF)
 # ---------------------------------------------------------------------------
 # Snaps
 # ---------------------------------------------------------------------------
  
 def snapToBlender(matrix):
     # LDraw snap matrix (LDU, top-level part space) -> mesh local space.
-    # Positions get the full LD_TO_BL (axes + scale); the rotation keeps only the
-    # axis swap so the stored matrix stays orthonormal.
     m = LD_TO_BL @ matrix
-    m[:3, :3] /= BRICK_SF
     return m
  
 def storeSnaps(mesh, snaps):
@@ -58,15 +46,15 @@ def storeSnaps(mesh, snaps):
         item.matrix = snapToBlender(s.matrix).ravel().tolist()
         item.capA, item.capB = s.capA, s.capB
         item.center, item.slide = s.center, s.slide
-        item.radius = s.radius * BRICK_SF
-        item.length = s.length * BRICK_SF
+        item.radius = s.radius
+        item.length = s.length
         item.bounding = " ".join(s.bounding)
         item.extra = json.dumps(s.extra) if s.extra else ""
         for shape, radius, length in s.secs:
             sec = item.secs.add()
             sec.shape = shape
-            sec.radius = radius * BRICK_SF
-            sec.length = length * BRICK_SF
+            sec.radius = radius
+            sec.length = length
 
 # ---------------------------------------------------------------------------
 # Materials
@@ -213,17 +201,21 @@ def makeTexturedMaterial(name, texPaths):
 # Mesh
 # ---------------------------------------------------------------------------
 
+def getBrickObj(brickId,mesh,colCode):
+    newObj = bpy.data.objects.new(brickId, mesh)
+    newObj.is_lego = True
+    if colCode != 16:
+        newObj.color = colors.rgbaFromCode(colCode)
+    return newObj
+
 def makeBrick(brickId, colId=16, mergeVerts=True, forceNew=True):
     # brickId:  part number ("3001") or relative path ("3001.dat", "s/3001s01.dat")
     # colId:    LDraw colour code substituted for faces using 16 (main colour)
     # forceNew: build a fresh mesh from source instead of reusing an existing one
 
-    meshName = brickId
-    mesh = bpy.data.meshes.get(meshName)
+    mesh = bpy.data.meshes.get(brickId)
     if mesh and not forceNew:
-        newObj = bpy.data.objects.new(brickId, mesh)
-        newObj.is_lego = True
-        return newObj
+        return getBrickObj(brickId,mesh,colId)
 
     relPath = brickId if brickId.lower().endswith((".dat", ".ldr")) else brickId + ".dat"
     partPath = library.resolvePart(relPath)
@@ -231,10 +223,9 @@ def makeBrick(brickId, colId=16, mergeVerts=True, forceNew=True):
         print(f"LDRAW IMPORTER: ERROR, Brick '{brickId}' not found in part library")
         return None
 
-    data = parser.parsePart(str(partPath), col=colId, matrix=LD_TO_BL)
-    mesh = bpy.data.meshes.new(meshName)
-    obj = bpy.data.objects.new(brickId, mesh)
-    obj.is_lego = True
+    data = parser.parsePart(str(partPath), col=16, matrix=LD_TO_BL)
+    mesh = bpy.data.meshes.new(brickId)
+    obj = getBrickObj(brickId,mesh,colId) 
     storeSnaps(mesh, data["connectors"])
 
     nFaces = len(data["faceQuads"])
@@ -260,7 +251,7 @@ def makeBrick(brickId, colId=16, mergeVerts=True, forceNew=True):
         localTex = np.where(faceTex >= 0, np.searchsorted(used, faceTex), -1).astype(np.int32)
         mesh.attributes.new("tex", 'INT', 'FACE').data.foreach_set("value", localTex)
         texPaths = [data["textures"][t] for t in used]
-        mesh.materials.append(makeTexturedMaterial(f"{meshName}_tex", texPaths))
+        mesh.materials.append(makeTexturedMaterial(f"{brickId}_tex", texPaths))
     else:
         mesh.materials.append(getSharedMaterial())
 
@@ -275,7 +266,7 @@ def makeBrick(brickId, colId=16, mergeVerts=True, forceNew=True):
     if mergeVerts:
         bm = bmesh.new()
         bm.from_mesh(mesh)
-        bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=MERGE_DIST)
+        bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=0.05)
         bm.to_mesh(mesh)
         bm.free()
 

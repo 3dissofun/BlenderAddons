@@ -9,13 +9,9 @@ def onLibChange(self,context):
 def onShadowLibChange(self,context):
     library.clearCaches()
 
-def onSfChange(self,context):
-    library.clearCaches()
-    importer.setScale(self.scaleFactor)
-
 class LE_AddonPreferences(bpy.types.AddonPreferences):
     bl_idname = __package__
-    scaleFactor: FloatProperty(name="Scale Factor", default=0.0004, update=onSfChange)
+    scaleFactor: FloatProperty(name="Scale Factor", default=0.0004)
     pieceLibrary: StringProperty(name="Piece Library",subtype='DIR_PATH',update=onLibChange)
     shadowLibrary: StringProperty(name="Shadow Library",subtype='DIR_PATH',update=onShadowLibChange)
 

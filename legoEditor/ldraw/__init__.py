@@ -12,5 +12,5 @@ def register():
 def unregister():
     snapUi.unregister()
     snapUiProps.unregister()
-    buildProps.register()
+    buildProps.unregister()
     buildOps.unregister()

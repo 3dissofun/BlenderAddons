@@ -18,7 +18,6 @@ class LEGO_OT_ImportRandom(bpy.types.Operator):
         wm = bpy.context.window_manager
 
         sf = bpy.context.preferences.addons[__package__.rpartition(".")[0]].preferences.scaleFactor
-        importer.setScale(sf)
         libPath = library.getPartLibrary()
         if libPath is None:
             self.report({'WARNING'},"No piece library set!")
@@ -46,7 +45,6 @@ class LEGO_OT_ImportBrick(bpy.types.Operator):
         wm = bpy.context.window_manager
         brickId = wm.brick_id
         sf = bpy.context.preferences.addons[__package__.rpartition(".")[0]].preferences.scaleFactor
-        importer.setScale(sf)
         if not brickId:
             self.report({'WARNING'},"Please provide a brick ID")
             return {'CANCELLED'}

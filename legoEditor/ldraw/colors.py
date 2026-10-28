@@ -101,15 +101,21 @@ def clrColMap():
     global colMap
     colMap = None
 
-def colFromCode(colCode):
-    code = parseCol(colCode)
-    if not colMap:
-        getColMap()
-    col = colMap.get(str(code),None)
-    if not col:
+def srgbToLinear(c):
+    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+def rgbaFromCode(colCode):
+    # Linear RGBA for an LDraw code, for obj.color (which is scene-linear)
+    cMap = getColMap()
+    if not cMap:
+        return None
+    entry = cMap.get(str(parseCol(colCode)))
+    if entry is None:
         print(f"LDRAW COLMAP: WARNING, Color not found for code '{colCode}'")
         return None
-    return col["col"]
+    r, g, b = (srgbToLinear(c) for c in hexToRgb(entry["col"]))
+    a = entry.get("alpha", 255) / 255.0
+    return (r, g, b, a) 
 
 def hexToRgb(hexVal):
     h = hexVal.lstrip("#")
