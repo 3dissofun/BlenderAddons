@@ -15,7 +15,7 @@ from pathlib import Path
 import bpy
 
 NAME = "LEGO"
-TEMPLATE = Path(__file__).parent / "lego_workspace.blend"
+TEMPLATE = Path(__file__).parent / "external" / "lego_workspace.blend"
 
 
 def _configureShading(workspace):

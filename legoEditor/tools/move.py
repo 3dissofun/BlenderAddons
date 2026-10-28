@@ -5,6 +5,7 @@ import bpy
 from mathutils import Matrix
 
 from .base import ModalTool
+from . import snapmatch
 
 ROTATE_STEP = math.radians(90)
 
@@ -27,6 +28,7 @@ def legoBricks(context):
 
 
 class LEGO_OT_move(ModalTool, bpy.types.Operator):
+    """Move bricks with the mouse, snapping onto other bricks. Hold Ctrl to move freely"""
     bl_idname = "lego.move"
     bl_label = "Move Brick"
     bl_options = {'REGISTER', 'UNDO'}
@@ -42,18 +44,29 @@ class LEGO_OT_move(ModalTool, bpy.types.Operator):
         # What update() translates from. Rotations accumulate here, while
         # self.saved keeps the originals so cancelling restores everything.
         self.base = dict(self.saved)
+
+        # Snaps of every other visible brick, gathered once in world space
+        self.snapper = snapmatch.Snapper(context, self.targets)
         return True
 
     def update(self, context, event):
         delta = (self.mouseToWorld(context, event, self.pivot) + self.grabOffset) - self.pivot
+        # A snap is a whole world transform: it may tilt the bricks to line their
+        # snap up with the target's, as well as moving them (see snapmatch.py)
+        snap = None if event.ctrl else self.snapper.find(context, self.base, delta)
         for obj, matrix in self.base.items():
-            m = matrix.copy()
-            m.translation = matrix.translation + delta
-            obj.matrix_world = m
-        # TODO: snapping, e.g. snapmatch.findBest(...) overriding the matrices above
+            if snap is not None:
+                obj.matrix_world = snap @ matrix
+            else:
+                m = matrix.copy()
+                m.translation = matrix.translation + delta
+                obj.matrix_world = m
         context.area.tag_redraw()
 
     def keyPress(self, context, event):
+        if event.type in {"LEFT_CTRL", "RIGHT_CTRL"}:
+            self.update(context, event)  # drop the snap straight away, not on the next move
+            return True
         step = ROTATE_KEYS.get(event.type)
         if step is None:
             return False

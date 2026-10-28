@@ -18,9 +18,6 @@ def register():
     ldd.register()
     uiOverhaul.register()
     
-    ldraw.library.setPartLibrary(r"C:\Users\Josh\Downloads\complete\ldraw")
-    ldraw.library.setShadowLibrary(r"C:\Users\Josh\Downloads\LDCadShadowLibrary-main\LDCadShadowLibrary-main")
-
 def unregister():
     ldd.unregister()
     ldraw.unregister()

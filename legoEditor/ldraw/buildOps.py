@@ -8,8 +8,6 @@ from pathlib import Path
 
 from . import importer, library
 
-brickIds = []
-
 class LEGO_OT_ImportRandom(bpy.types.Operator):
     bl_idname = "lego.import_random"
     bl_label = "Import Random Brick"
@@ -20,37 +18,12 @@ class LEGO_OT_ImportRandom(bpy.types.Operator):
         wm = bpy.context.window_manager
 
         sf = bpy.context.preferences.addons[__package__.rpartition(".")[0]].preferences.scaleFactor
-        partsPath = Path(library.getPartLibrary()) / "parts"
-        if not partsPath.exists():
-            self.report({'ERROR'},"No 'parts' subdirectory found in piece library")
+        libPath = library.getPartLibrary()
+        if libPath is None:
+            self.report({'WARNING'},"No piece library set!")
             return {'CANCELLED'}
 
-        
-        global brickIds
-        if not brickIds:
-            ranCatalog = partsPath / "catalogRandom.txt"
-
-            # 1. try the cached catalog on disk
-            if ranCatalog.is_file():
-                try:
-                    lines = ranCatalog.read_text(encoding="utf-8").splitlines()
-                    brickIds = [l.strip() for l in lines if l.strip()]
-                except OSError as e:
-                    print(f"LEGO: could not read {ranCatalog}: {e}")
-
-            # 2. no cache (or empty/unreadable): scan the parts folder and save the result
-            if not brickIds:
-                brickIds = [f.stem for f in partsPath.iterdir() if f.is_file() and f.suffix.lower() == ".dat" and f.stem.isdigit()]
-                if not brickIds:
-                    self.report({'ERROR'},"No .dat files found in piece library parts subdir")
-                    return {'CANCELLED'}
-                try:
-                    ranCatalog.write_text("\n".join(brickIds), encoding="utf-8")
-                except OSError as e:
-                    # read-only library etc: still works this session, just not cached
-                    print(f"LEGO: could not write {ranCatalog}: {e}")
-
-
+        brickIds = library.getAllParts()       
         brickId = random.choice(brickIds)
         obj = importer.makeBrick(brickId)
         if obj:
@@ -144,12 +117,19 @@ classes = (LEGO_OT_ImportBrick, LEGO_OT_ImportRandom, LEGO_OT_DebugSnaps, LEGO_O
 def importMenu(self, context):
     self.layout.operator(LEGO_OT_ImportLdr.bl_idname, text="LEGO LDR file (.ldr)")
 
+def objectMenu(self, context):
+    # 3D Viewport > Object menu; greyed out unless the active object is a brick
+    self.layout.separator()
+    self.layout.operator(LEGO_OT_DebugSnaps.bl_idname, icon='CONSOLE')
+
 def register():
     for c in classes:
         bpy.utils.register_class(c)
     bpy.types.TOPBAR_MT_file_import.append(importMenu)
+    bpy.types.VIEW3D_MT_object.append(objectMenu)
 
 def unregister():
+    bpy.types.VIEW3D_MT_object.remove(objectMenu)
     bpy.types.TOPBAR_MT_file_import.remove(importMenu)
     for c in reversed(classes):
         bpy.utils.unregister_class(c)
