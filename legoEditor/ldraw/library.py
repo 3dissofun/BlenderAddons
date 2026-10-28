@@ -26,7 +26,7 @@ def startBackgroundBuild():
 
 def waitForBuild():
     thread = buildThread
-    if (thread is not None and thread.is_alive and thread is not threading.current_thread()):
+    if (thread is not None and thread.is_alive() and thread is not threading.current_thread()):
         thread.join()
 
 def buildPartIndex():

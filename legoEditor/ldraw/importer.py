@@ -10,7 +10,8 @@ from pathlib import Path
 import json
 import tempfile
 
-from . import parser, library, colors
+from . import parser, library
+from .col import colors
 
 SHADER_FILE = Path(__file__).parent.parent / "external" / "shaders.blend"
 SHADER_GROUP = "LEGO_SN"
@@ -211,6 +212,7 @@ def makeBrick(brickId, colId=16, mergeVerts=True, forceNew=True):
     # brickId:  part number ("3001") or relative path ("3001.dat", "s/3001s01.dat")
     # colId:    LDraw colour code substituted for faces using 16 (main colour)
     # forceNew: build a fresh mesh from source instead of reusing an existing one
+    
 
     mesh = bpy.data.meshes.get(brickId)
     if mesh and not forceNew:
