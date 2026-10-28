@@ -1,7 +1,7 @@
 """
-Build a Geometry Nodes group that holds every final LDraw brick as an instance.
+Import every final LDraw brick into a library collection and save an index map of them.
 
-Run from Blender's Text Editor (or `blender file.blend --python buildBrickInstances.py`)
+Run from Blender's Text Editor (or `blender file.blend --python importBrickLibrary.py`)
 with the Lego Editor addon enabled and its part library set in the addon preferences.
 
 What it does
@@ -12,17 +12,17 @@ What it does
              builds each one on the main thread with importer.makeBrick (bpy data
              can only be created on the main thread). Bricks land in a collection
              that is excluded from the view layer.
-  3. Build:  creates NODE_GROUP_NAME with one Object Info node per brick, linked into
-             Geometry to Instance in index order, so instance i is brick i.
-             Building one tree with tens of thousands of nodes from Python takes hours,
-             so a full library is split into sub-groups of CHUNK_SIZE bricks (each one
-             Object Info -> Geometry to Instance) that the main group joins in order.
-             The output is still one flat instance list: instance i is brick i.
-  4. Save:   writes the {index: brickName} map to a text block in the .blend and,
+  3. Save:   writes the {index: brickName} map to a text block in the .blend and,
              if MAP_FILE is set, to a JSON file.
 
-Only bricks that imported with geometry get an index, so the map always matches the
-node group exactly.
+Only bricks that imported with geometry get an index, so every index in the map has
+a brick object in COLLECTION_NAME (tagged with its name in obj["lego_brick"]).
+
+With USE_EXTERNAL_INDEX on, step 1 is replaced by reading EXTERNAL_INDEX_FILE (the
+fixed-width .bin written by brickIndexBlob.py), so the order is exactly the one in
+that file. Indices are never renumbered in this mode: a
+brick that fails to import keeps its slot and is listed in the log, and the external
+file is never overwritten.
 """
 
 import bpy
@@ -30,6 +30,7 @@ import os
 import sys
 import json
 import time
+import numpy as np
 from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 
@@ -37,24 +38,26 @@ from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 # Settings
 # ---------------------------------------------------------------------------
 
-NODE_GROUP_NAME = "LEGO_BrickInstances"
 COLLECTION_NAME = "LEGO_BrickLibrary"
 MAP_TEXT_NAME = "lego_brick_index.json"
 LOG_TEXT_NAME = "lego_brick_import_log.txt"
 MAP_FILE = "//lego_brick_index.json"  # "//" = next to the .blend; "" to skip writing a file
+
+USE_EXTERNAL_INDEX = False                 # True: take brick order from EXTERNAL_INDEX_FILE
+EXTERNAL_INDEX_FILE = "//pieceIndex.bin"   # 64-byte records from brickIndexBlob.py
+
+# Record layout, must match brickIndexBlob.py: uint32 index | uint32 chrAmount | 56-byte name
+INDEX_RECORD = np.dtype([("index", "<u4"), ("chrAmount", "<u4"), ("name", "S56")])
 
 INCLUDE_SHORTCUTS = True          # pre-assembled parts (e.g. hinge assemblies, minifig legs)
 INCLUDE_ALIASES = False           # "=" parts that just reference another part number
 INCLUDE_PHYSICAL_COLOUR = False   # "_" parts that are another part in a fixed colour
 INCLUDE_FLEXIBLE_SECTIONS = False # hose / cable segments
 
+PROGRESS_EVERY = 500   # print a progress line every N bricks imported
 LIMIT = 0              # > 0 imports only the first N mapped bricks (handy for a test run)
 WORKERS = max(1, os.cpu_count() or 4)
 REUSE_EXISTING = True  # keep bricks already in COLLECTION_NAME instead of re-importing them
-CHUNK_SIZE = 256       # bricks per sub-group once the library is bigger than this (see buildNodeGroup)
-
-COLUMN_ROWS = 64       # Object Info nodes per column in the node editor
-NODE_DX, NODE_DY = 220, 190
 
 # ---------------------------------------------------------------------------
 # Addon modules
@@ -75,6 +78,10 @@ importer, library, parser = getAddonModules()
 # ---------------------------------------------------------------------------
 # 1. Map final bricks
 # ---------------------------------------------------------------------------
+
+def progress(msg):
+    # flush, so each line shows up in Blender's console while the script is still running
+    print(f"LEGO LIBRARY: {msg}", flush=True)
 
 def readHeader(path):
     # (description, LDRAW_ORG type, qualifier set) from the file's header block
@@ -122,6 +129,7 @@ def isFinalBrick(path):
 def mapFinalBricks(log):
     # Ordered list of brick names ("3001", "3626cp01" ...), sorted as in library.getAllParts()
     keys = library.getAllParts()  # top level of parts/, already excludes parts/s
+    progress(f"Scanning {len(keys)} part headers...")
     paths = [library.partIndexLookup(k) for k in keys]
     with ThreadPoolExecutor(WORKERS) as pool:
         verdicts = list(pool.map(lambda p: isFinalBrick(p) if p else (False, "missing"), paths))
@@ -137,6 +145,42 @@ def mapFinalBricks(log):
     for why, ks in sorted(skipped.items()):
         log.append(f"  skipped {len(ks):6d}  {why}")
     return names
+
+def loadExternalIndex(log):
+    # {index: brickName} from the binary EXTERNAL_INDEX_FILE, kept exactly as written.
+    # Each record's own index field is used, so gaps and any record order are fine.
+    path = bpy.path.abspath(EXTERNAL_INDEX_FILE)
+    if not os.path.isfile(path):
+        raise RuntimeError(f"USE_EXTERNAL_INDEX is on but '{path}' doesn't exist")
+    size = os.path.getsize(path)
+    if size % INDEX_RECORD.itemsize:
+        raise RuntimeError(f"'{path}' is {size} bytes, not a whole number of "
+                           f"{INDEX_RECORD.itemsize}-byte records. Is it the fixed-width format?")
+    records = np.fromfile(path, dtype=INDEX_RECORD)
+
+    lengths = np.char.str_len(records["name"])  # stored bytes, trailing padding dropped
+    bad = np.nonzero(lengths != records["chrAmount"])[0]
+    if len(bad):
+        raise RuntimeError(f"'{path}': record {bad[0]} has chrAmount {records['chrAmount'][bad[0]]} "
+                           f"but {lengths[bad[0]]} name bytes. The file may be corrupt.")
+    if len(np.unique(records["index"])) != len(records):
+        raise RuntimeError(f"'{path}': the same index appears in more than one record")
+
+    indexMap = {}
+    for i, raw in zip(records["index"].tolist(), records["name"].tolist()):
+        # Same form the mapper produces: lowercase part number, no .dat
+        indexMap[i] = raw.decode("utf-8").strip().replace("\\", "/").lower().removesuffix(".dat")
+
+    indexMap = dict(sorted(indexMap.items()))
+    names = list(indexMap.values())
+    dupes = len(names) - len(set(names))
+    gaps = (max(indexMap) + 1 - len(indexMap)) if indexMap else 0
+    log.append(f"Using external index '{path}': {len(indexMap)} bricks")
+    if dupes:
+        log.append(f"  WARNING, {dupes} duplicate names; each is imported once and shared")
+    if gaps:
+        log.append(f"  NOTE, {gaps} unused indices between 0 and {max(indexMap)}")
+    return indexMap, path
 
 # ---------------------------------------------------------------------------
 # 2. Import (threaded parse, main-thread build)
@@ -203,6 +247,7 @@ def importBricks(names, coll, log):
     todo = [n for n in names if n not in objs]
     if objs:
         log.append(f"Reusing {len(objs)} bricks already in '{COLLECTION_NAME}'")
+        progress(f"Reusing {len(objs)} bricks already in '{COLLECTION_NAME}'")
     if not todo:
         return objs
 
@@ -236,6 +281,8 @@ def importBricks(names, coll, log):
 
         topUp()
         done = 0
+        nextReport = PROGRESS_EVERY
+        progress(f"Importing {len(todo)} bricks with {WORKERS} threads...")
         while pending:
             finished, pending = wait(pending, return_when=FIRST_COMPLETED)
             topUp()
@@ -268,10 +315,14 @@ def importBricks(names, coll, log):
                 objs[name] = obj
 
             wm.progress_update(done)
-            if done % 250 < len(finished) or not pending:
-                rate = done / max(time.perf_counter() - start, 1e-6)
+            if done >= nextReport or not pending:
+                nextReport = (done // PROGRESS_EVERY + 1) * PROGRESS_EVERY
+                elapsed = time.perf_counter() - start
+                rate = done / max(elapsed, 1e-6)
                 eta = (len(todo) - done) / max(rate, 1e-6)
-                print(f"LEGO INSTANCES: {done}/{len(todo)} bricks  ({rate:.1f}/s, ~{eta/60:.1f} min left)")
+                progress(f"{done}/{len(todo)} bricks ({100 * done / len(todo):.0f}%), "
+                         f"{len(failed)} failed, {rate:.1f}/s, "
+                         f"{elapsed / 60:.1f} min elapsed, ~{eta / 60:.1f} min left")
 
     wm.progress_end()
     log.append(f"Imported {len(todo) - len(failed)} of {len(todo)} bricks "
@@ -282,108 +333,14 @@ def importBricks(names, coll, log):
     return objs
 
 # ---------------------------------------------------------------------------
-# 3. Node group
+# 3. Index map
 # ---------------------------------------------------------------------------
 
-def linkInOrder(tree, outputs, socket):
-    # Blender puts the newest link at the top of a multi-input socket and evaluates
-    # top to bottom, so link in reverse to get outputs[0] first. Checked afterwards.
-    for out in reversed(outputs):
-        tree.links.new(out, socket)
-    got = [l.from_socket for l in socket.links]
-    if got != list(outputs):
-        raise RuntimeError(f"Link order on '{socket.node.name}' did not come out as expected "
-                           f"({len(got)} links, expected {len(outputs)})")
-
-def freshGroup(name):
-    # Empty geometry node group with a single "Instances" output
-    group = bpy.data.node_groups.get(name)
-    if group is None:
-        group = bpy.data.node_groups.new(name, "GeometryNodeTree")
-    group.nodes.clear()
-    group.interface.clear()
-    group.interface.new_socket(name="Instances", in_out='OUTPUT', socket_type='NodeSocketGeometry')
-    return group
-
-def fillBrickGroup(group, chunk, start):
-    # Object Info per brick -> one Geometry to Instance -> output, in order
-    nodes = group.nodes
-    infoOuts = []
-    for j, (name, obj) in enumerate(chunk):
-        i = start + j
-        n = nodes.new("GeometryNodeObjectInfo")
-        n.label = f"{i}: {name}"
-        n.inputs["Object"].default_value = obj
-        n.location = ((j // COLUMN_ROWS) * NODE_DX, -(j % COLUMN_ROWS) * NODE_DY)
-        n.hide = True
-        infoOuts.append(n.outputs["Geometry"])
-
-    x = max(1, -(-len(chunk) // COLUMN_ROWS)) * NODE_DX + 200
-    gti = nodes.new("GeometryNodeGeometryToInstance")
-    gti.label = f"Bricks {start}-{start + len(chunk) - 1}"
-    gti.location = (x, 0)
-    if infoOuts:
-        linkInOrder(group, infoOuts, gti.inputs["Geometry"])
-    out = nodes.new("NodeGroupOutput")
-    out.location = (x + 250, 0)
-    group.links.new(gti.outputs["Instances"], out.inputs[0])
-
-def removeOldChunks():
-    prefix = NODE_GROUP_NAME + "_"
-    for g in [g for g in bpy.data.node_groups if g.name.startswith(prefix) and g.get("lego_brick_chunk")]:
-        bpy.data.node_groups.remove(g)
-
-def buildNodeGroup(ordered):
-    # ordered: [(brickName, object)] in index order. The output is a flat instance
-    # list where instance i is brick i.
-    #
-    # Every node/link added through Python costs time proportional to the size of
-    # the tree it lands in, so one 20k-node tree takes hours to build (and is
-    # sluggish to open). Up to CHUNK_SIZE bricks go straight into the main group;
-    # beyond that, each CHUNK_SIZE bricks get their own sub-group (same Object Info
-    # -> Geometry to Instance layout) and the main group joins them in order.
-    # Join Geometry appends instances in input order, so indices stay flat.
-    removeOldChunks()
-    group = freshGroup(NODE_GROUP_NAME)
-    size = min(CHUNK_SIZE, 4095)
-
-    if len(ordered) <= size:
-        fillBrickGroup(group, ordered, 0)
-    else:
-        nodes = group.nodes
-        chunkOuts = []
-        for c, s in enumerate(range(0, len(ordered), size)):
-            sub = freshGroup(f"{NODE_GROUP_NAME}_{c:03d}")
-            sub["lego_brick_chunk"] = c
-            fillBrickGroup(sub, ordered[s:s + size], s)
-            gn = nodes.new("GeometryNodeGroup")
-            gn.node_tree = sub
-            gn.label = f"Bricks {s}-{min(s + size, len(ordered)) - 1}"
-            gn.location = (0, -c * 60)
-            gn.hide = True
-            chunkOuts.append(gn.outputs[0])
-            if c % 10 == 0:
-                print(f"LEGO INSTANCES: node groups {s}/{len(ordered)} bricks")
-
-        join = nodes.new("GeometryNodeJoinGeometry")
-        join.location = (400, 0)
-        linkInOrder(group, chunkOuts, join.inputs["Geometry"])
-        out = nodes.new("NodeGroupOutput")
-        out.location = (650, 0)
-        group.links.new(join.outputs["Geometry"], out.inputs[0])
-
-    group["brick_count"] = len(ordered)
-    return group
-
-# ---------------------------------------------------------------------------
-# 4. Index map
-# ---------------------------------------------------------------------------
-
-def saveMap(indexMap, log):
+def saveMap(indexMap, log, writeFile=True):
     text = json.dumps({str(i): n for i, n in indexMap.items()}, indent=1)
     block = bpy.data.texts.get(MAP_TEXT_NAME) or bpy.data.texts.new(MAP_TEXT_NAME)
     block.from_string(text)
-    if MAP_FILE:
+    if writeFile and MAP_FILE:
         if MAP_FILE.startswith("//") and not bpy.data.filepath:
             log.append(f"Blend file isn't saved, so the map is only in the '{MAP_TEXT_NAME}' text block")
         else:
@@ -404,25 +361,43 @@ def main():
     log = []
     t0 = time.perf_counter()
 
-    names = mapFinalBricks(log)
-    if LIMIT > 0:
-        names = names[:LIMIT]
-        log.append(f"LIMIT set: using the first {len(names)}")
+    if USE_EXTERNAL_INDEX:
+        external, extPath = loadExternalIndex(log)
+        if LIMIT > 0:
+            external = dict(list(external.items())[:LIMIT])
+            log.append(f"LIMIT set: using the first {len(external)}")
+        names = list(dict.fromkeys(external.values()))  # unique, in index order
+    else:
+        names = mapFinalBricks(log)
+        if LIMIT > 0:
+            names = names[:LIMIT]
+            log.append(f"LIMIT set: using the first {len(names)}")
 
     coll = getLibraryCollection()
     objs = importBricks(names, coll, log)
 
-    ordered = [(n, objs[n]) for n in names if n in objs]  # map order, failures dropped
-    indexMap = {i: n for i, (n, _) in enumerate(ordered)}
-    group = buildNodeGroup(ordered)
-    saveMap(indexMap, log)
+    if USE_EXTERNAL_INDEX:
+        # Order is fixed by the file: nothing is renumbered, failures keep their slot
+        indexMap = external
+        missing = [(i, n) for i, n in indexMap.items() if n not in objs]
+        if missing:
+            log.append(f"{len(missing)} indices have no brick object:")
+            log.extend(f"  {i}: {n}" for i, n in missing)
+        saveMap(indexMap, log, writeFile=False)
+        log.append(f"External index left untouched: {extPath}")
+        count = len(indexMap) - len(missing)
+    else:
+        ordered = [n for n in names if n in objs]  # map order, failures dropped
+        indexMap = dict(enumerate(ordered))
+        saveMap(indexMap, log)
+        count = len(indexMap)
 
-    log.append(f"Node group '{group.name}': {len(ordered)} bricks, "
+    log.append(f"Library '{coll.name}': {count} bricks indexed, "
                f"total {time.perf_counter() - t0:.1f}s")
     writeLog(log)
     shown = log if len(log) <= 15 else log[:12] + ["..."] + log[-2:]
-    print("\n".join("LEGO INSTANCES: " + l for l in shown))
-    print(f"LEGO INSTANCES: full log in the '{LOG_TEXT_NAME}' text block")
+    print("\n".join("LEGO LIBRARY: " + l for l in shown))
+    print(f"LEGO LIBRARY: full log in the '{LOG_TEXT_NAME}' text block")
     return indexMap
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 import bpy
-from . import buildOps, buildProps, library, snapUiProps, snapUi
+from . import buildOps, buildProps, library
+from .snaps import snapUiProps, snapUi
 from . import pointCloud
 
 def register():

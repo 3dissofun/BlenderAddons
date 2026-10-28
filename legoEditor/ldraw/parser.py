@@ -2,7 +2,9 @@ import numpy as np
 import shlex
 from pathlib import Path
 
-from . import library, textures, snapping, colors
+from . import library, textures
+from .snaps import snapping
+from .col import colors
 
 def buildFace(lArgs, nVerts, col, matrix, reverse, tex, output):
     # Build a triangle (nVerts=3) or quad (nVerts=4) from a type 3 or 4 line

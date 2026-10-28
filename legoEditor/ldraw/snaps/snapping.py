@@ -18,7 +18,7 @@ from functools import lru_cache
 
 import numpy as np
 
-from . import library
+from .. import library
 
 SNAP_KINDS = ("SNAP_CYL", "SNAP_CLP", "SNAP_FGR", "SNAP_GEN", "SNAP_SPH")
 SEC_SHAPES = ("R", "A", "S", "_L", "L_")

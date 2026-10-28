@@ -51,7 +51,8 @@ import time
 from bpy.props import StringProperty
 from bpy_extras.io_utils import ImportHelper
 
-from . import importer, library, colors
+from . import importer, library
+from .col import colors
 
 LD_TO_BL = importer.LD_TO_BL
 BL_FROM_LD = np.linalg.inv(LD_TO_BL)
