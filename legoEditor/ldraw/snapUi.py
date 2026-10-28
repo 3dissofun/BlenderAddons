@@ -3,8 +3,11 @@
 For each snap:
 - a cross in the plane across the snap's axis, with arms as long as its radius.
   Blue = male, red = female.
-- cylinder snaps also get a second cross at the far end of their profile and a
-  line along the axis joining the two.
+- cylinder snaps get a cross at both ends of every section of their profile,
+  each sized to that section's own radius (so a stepped profile such as 6141's
+  top, R 10 3  R 6 4, shows the wide collar and then the narrower stud, as
+  LDCad draws it), plus a line along the axis over the whole profile.
+  Snap.radius is the largest section, so it is only used for other kinds.
 
 Both are tiny custom gizmos (one LINES shape each). Their size is baked into
 the gizmo matrix and scale_basis stays 1, so they are drawn in world units and
@@ -51,6 +54,10 @@ class VIEW3D_GT_lego_line(bpy.types.Gizmo):
 def _hasSnaps(obj):
     return obj.type == 'MESH' and obj.is_lego and len(obj.data.lego_snaps) > 0
 
+def _crossScale(radius):
+    size = max(radius, MIN_CROSS)
+    return Matrix.Diagonal((size, size, 1.0, 1.0))
+
 def _gizmoSpecs(obj):
     # (gizmo type, world matrix, colour) for every gizmo of a brick.
     # Gizmo frames use local Z as the snap axis: columns (snap X, snap Z, snap -Y).
@@ -62,8 +69,6 @@ def _gizmoSpecs(obj):
         axis = -y
         frame = Matrix((x, z, axis)).transposed().to_4x4()
         col = MALE_COL if snap.gender == 'M' else FEMALE_COL
-        size = max(snap.radius, MIN_CROSS)
-        crossScale = Matrix.Diagonal((size, size, 1.0, 1.0))
 
         def at(point):
             f = frame.copy()
@@ -71,14 +76,23 @@ def _gizmoSpecs(obj):
             return mw @ f
 
         origin = m.translation
-        if snap.kind == 'CYL' and snap.length > 0:
-            start = origin - axis * (snap.length / 2) if snap.center else origin
-            end = start + axis * snap.length
-            specs.append((CROSS, at(start) @ crossScale, col))
-            specs.append((CROSS, at(end) @ crossScale, col))
-            specs.append((LINE, at(start) @ Matrix.Diagonal((1.0, 1.0, snap.length, 1.0)), col))
+        secs = [(sec.radius, sec.length) for sec in snap.secs]
+        length = sum(l for _, l in secs)
+        if snap.kind == 'CYL' and secs and length > 0:
+            start = origin - axis * (length / 2) if snap.center else origin
+            # A cross at both ends of each section, at that section's radius.
+            # Where two sections of the same radius meet, one cross is enough.
+            pos, prev = 0.0, None
+            for radius, secLen in secs:
+                for t in (pos, pos + secLen):
+                    key = (round(t, 4), round(radius, 4))
+                    if key != prev:
+                        specs.append((CROSS, at(start + axis * t) @ _crossScale(radius), col))
+                    prev = key
+                pos += secLen
+            specs.append((LINE, at(start) @ Matrix.Diagonal((1.0, 1.0, length, 1.0)), col))
         else:
-            specs.append((CROSS, at(origin) @ crossScale, col))
+            specs.append((CROSS, at(origin) @ _crossScale(snap.radius), col))
     return specs
 
 def _allSpecs(context):

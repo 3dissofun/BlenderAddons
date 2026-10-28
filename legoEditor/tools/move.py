@@ -51,14 +51,16 @@ class LEGO_OT_move(ModalTool, bpy.types.Operator):
 
     def update(self, context, event):
         delta = (self.mouseToWorld(context, event, self.pivot) + self.grabOffset) - self.pivot
-        if not event.ctrl:
-            snapped = self.snapper.find(context, self.base, delta)
-            if snapped is not None:
-                delta = snapped
+        # A snap is a whole world transform: it may tilt the bricks to line their
+        # snap up with the target's, as well as moving them (see snapmatch.py)
+        snap = None if event.ctrl else self.snapper.find(context, self.base, delta)
         for obj, matrix in self.base.items():
-            m = matrix.copy()
-            m.translation = matrix.translation + delta
-            obj.matrix_world = m
+            if snap is not None:
+                obj.matrix_world = snap @ matrix
+            else:
+                m = matrix.copy()
+                m.translation = matrix.translation + delta
+                obj.matrix_world = m
         context.area.tag_redraw()
 
     def keyPress(self, context, event):

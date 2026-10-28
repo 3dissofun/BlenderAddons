@@ -117,12 +117,19 @@ classes = (LEGO_OT_ImportBrick, LEGO_OT_ImportRandom, LEGO_OT_DebugSnaps, LEGO_O
 def importMenu(self, context):
     self.layout.operator(LEGO_OT_ImportLdr.bl_idname, text="LEGO LDR file (.ldr)")
 
+def objectMenu(self, context):
+    # 3D Viewport > Object menu; greyed out unless the active object is a brick
+    self.layout.separator()
+    self.layout.operator(LEGO_OT_DebugSnaps.bl_idname, icon='CONSOLE')
+
 def register():
     for c in classes:
         bpy.utils.register_class(c)
     bpy.types.TOPBAR_MT_file_import.append(importMenu)
+    bpy.types.VIEW3D_MT_object.append(objectMenu)
 
 def unregister():
+    bpy.types.VIEW3D_MT_object.remove(objectMenu)
     bpy.types.TOPBAR_MT_file_import.remove(importMenu)
     for c in reversed(classes):
         bpy.utils.unregister_class(c)
