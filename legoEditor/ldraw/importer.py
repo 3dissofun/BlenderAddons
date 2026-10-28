@@ -10,7 +10,8 @@ from pathlib import Path
 import json
 import tempfile
 
-from . import parser, library, colors
+from . import parser, library
+from .col import colors
 
 SHADER_FILE = Path(__file__).parent.parent / "external" / "shaders.blend"
 SHADER_GROUP = "LEGO_SN"
