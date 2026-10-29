@@ -1,11 +1,11 @@
 """
-The purpose of this module is to provide a blender precached
+The purpose of this module is to provide a blender precached library of pieces to quickly append from
+There is an index binary referenced and a library blend file to correlate with it
 """
-from pathlib import Path
-from . import index
-
-pieceIndex = Path(__file__).parent / "pieceIndex.bin"
 
 def register():
+    # Preload the index on a background thread to not hang on first import
+    pass
 
 def unregister():
+    pass

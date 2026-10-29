@@ -1,7 +1,7 @@
 from pathlib import Path
 import json
 
-from .. import library
+from ..importer import library
 
 FINISH_KEYWORDS = ("CHROME", "PEARLESCENT", "METAL", "RUBBER")
 

@@ -180,3 +180,6 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 legoEditor/external/lego_brick_library.blend
+/legoEditor/external/ldrawLibrary
+legoEditor/external/ldrawLibrary.blend
+legoEditor/external/lego_workspace.blend1

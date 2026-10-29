@@ -6,7 +6,8 @@ import time
 import random
 from pathlib import Path
 
-from . import importer, library
+from .importer import importer, library
+from .. import utils
 
 class LEGO_OT_ImportRandom(bpy.types.Operator):
     bl_idname = "lego.import_random"
@@ -17,7 +18,7 @@ class LEGO_OT_ImportRandom(bpy.types.Operator):
         start = time.perf_counter()
         wm = bpy.context.window_manager
 
-        sf = bpy.context.preferences.addons[__package__.rpartition(".")[0]].preferences.scaleFactor
+        sf = utils.getPref("scaleFactor")
         libPath = library.getPartLibrary()
         if libPath is None:
             self.report({'WARNING'},"No piece library set!")
@@ -25,11 +26,13 @@ class LEGO_OT_ImportRandom(bpy.types.Operator):
 
         brickIds = library.getAllParts()       
         brickId = random.choice(brickIds)
-        obj = importer.makeBrick(brickId)
+        obj = importer.getBrickMesh(brickId)
         if obj:
             duration = round(time.perf_counter() - start,4)*1000
             self.report({'INFO'},f"Brick built in {duration}ms")
-            context.scene.collection.objects.link(obj)
+            actualObj = bpy.data.objects.new("wow",obj)
+            actualObj.is_lego = True
+            context.scene.collection.objects.link(actualObj)
             return {'FINISHED'}
         else:
             self.report({'WARNING'},"No brick found for given ID")
@@ -44,16 +47,18 @@ class LEGO_OT_ImportBrick(bpy.types.Operator):
         start = time.perf_counter()
         wm = bpy.context.window_manager
         brickId = wm.brick_id
-        sf = bpy.context.preferences.addons[__package__.rpartition(".")[0]].preferences.scaleFactor
+        sf = utils.getPref("scaleFactor")
         if not brickId:
             self.report({'WARNING'},"Please provide a brick ID")
             return {'CANCELLED'}
 
-        obj = importer.makeBrick(brickId)
+        obj = importer.getBrickMesh(brickId)
         if obj:
             duration = round(time.perf_counter() - start,4)*1000
             self.report({'INFO'},f"Brick built in {duration}ms")
-            context.scene.collection.objects.link(obj)
+            actualObj = bpy.data.objects.new("wow",obj)
+            actualObj.is_lego = True
+            context.scene.collection.objects.link(actualObj)
             return {'FINISHED'}
         else:
             self.report({'WARNING'},"No brick found for given ID")

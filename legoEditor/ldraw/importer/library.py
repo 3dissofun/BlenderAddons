@@ -1,11 +1,12 @@
+import bpy
+
 from pathlib import Path
 from functools import lru_cache
 import os
 import threading
 
-import bpy
+from ... import utils
 
-addonName = __package__.rpartition(".")[0]
 overlayDir = None  # folder of files unpacked from an MPD, searched first
 
 # ---------------------------------------------------------------------------
@@ -95,7 +96,7 @@ def setOverlay(path):
     clearCaches()
 
 def getPartLibrary():
-    prefPath = bpy.context.preferences.addons[addonName].preferences.pieceLibrary
+    prefPath = utils.getPref("pieceLibrary")
     if not prefPath:
         print("LDRAW LIBRARY: WARNING, No part library set")
         return None
@@ -103,7 +104,7 @@ def getPartLibrary():
     return partLib
 
 def getShadowLibrary():
-    prefPath = bpy.context.preferences.addons[addonName].preferences.shadowLibrary
+    prefPath = utils.getPref("shadowLibrary")
     if not prefPath:
         print("LDRAW LIBRARY: WARNING, No shadow library set")
         return None

@@ -12,6 +12,7 @@ import tempfile
 
 from . import parser, library
 from .col import colors
+from ..ldrawLibrary import index
 
 SHADER_FILE = Path(__file__).parent.parent / "external" / "shaders.blend"
 SHADER_GROUP = "LEGO_SN"
@@ -201,6 +202,18 @@ def makeTexturedMaterial(name, texPaths):
 # Mesh
 # ---------------------------------------------------------------------------
 
+def _inOverlay(brickId):
+    # Parts embedded in the MPD being imported must win over the prebuilt
+    # library (the file's own version of a part, as the MPD spec requires)
+    overlay = library.getOverlay()
+    return bool(overlay) and (overlay / library._normalise(brickId)).is_file()
+ 
+def _fromLibrary(brickId):
+    # Prebuilt mesh from the brick library, or None
+    if _inOverlay(brickId):
+        return None
+    return index.appendMesh(brickId)
+
 def getBrickObj(brickId,mesh,colCode):
     newObj = bpy.data.objects.new(brickId, mesh)
     newObj.is_lego = True
@@ -208,7 +221,7 @@ def getBrickObj(brickId,mesh,colCode):
         newObj.color = colors.rgbaFromCode(colCode)
     return newObj
 
-def makeBrick(brickId, colId=16, mergeVerts=True, forceNew=True):
+def makeBrick(brickId, colId=16, mergeVerts=True, forceNew=False, useLibrary=True):
     # brickId:  part number ("3001") or relative path ("3001.dat", "s/3001s01.dat")
     # colId:    LDraw colour code substituted for faces using 16 (main colour)
     # forceNew: build a fresh mesh from source instead of reusing an existing one
@@ -216,6 +229,11 @@ def makeBrick(brickId, colId=16, mergeVerts=True, forceNew=True):
     mesh = bpy.data.meshes.get(brickId)
     if mesh and not forceNew:
         return getBrickObj(brickId,mesh,colId)
+
+    if useLibrary:
+        mesh = _fromLibrary(brickId)
+        if mesh is not None:
+            return getBrickObj(brickId,mesh,colId)
 
     relPath = brickId if brickId.lower().endswith((".dat", ".ldr")) else brickId + ".dat"
     partPath = library.resolvePart(relPath)
@@ -326,7 +344,7 @@ def _isPart(lines):
             return True
     return False
 
-def importLdr(ldrPath, collection):
+def importLdr(ldrPath, collection, useLibrary=True):
     fromBl = np.linalg.inv(LD_TO_BL)
     models = _readModels(ldrPath)
     if not any(models.values()):
@@ -334,7 +352,7 @@ def importLdr(ldrPath, collection):
     main = next(iter(models))
     parts = {n: ls for n, ls in models.items() if n != main and _isPart(ls)}
     subModels = {n: ls for n, ls in models.items() if n not in parts}
-
+ 
     objs = []
     with tempfile.TemporaryDirectory() as tmp:
         for name, lines in parts.items():
@@ -343,8 +361,18 @@ def importLdr(ldrPath, collection):
             p.write_text("\n".join(lines) + "\n", encoding="utf-8")
         library.setOverlay(tmp)
         try:
-            for ref, col, m in _placements(subModels, main):
-                obj = makeBrick(ref, colId=col, forceNew=False)
+            placements = list(_placements(subModels, main))
+            libMeshes = {}
+            if useLibrary:
+                refs = {ref for ref, _, _ in placements if not _inOverlay(ref)}
+                libMeshes = index.appendMeshes(refs)
+
+            for ref, col, m in placements:
+                mesh = libMeshes.get(ref)
+                if mesh is not None:
+                    obj = getBrickObj(ref, mesh, col)
+                else:
+                    obj = makeBrick(ref, colId=col, forceNew=False, useLibrary=False)
                 if obj is None:
                     continue
                 obj.matrix_world = Matrix((LD_TO_BL @ m @ fromBl).tolist())
