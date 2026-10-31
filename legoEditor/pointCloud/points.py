@@ -42,7 +42,6 @@ def importAsPoint(brickId, model="misc"):
     # make the new point
     currentAmount = len(pc.points)
     pc.resize(currentAmount + 1)
-    newIndex = currentAmount - 1
 
     # Read type attribute
     typeAttr = None
@@ -70,7 +69,7 @@ def importAsPoint(brickId, model="misc"):
     prototype.name = f"{nextFreeType:05d}"
     if typeAttr is None:
         typeAttr = pc.attributes.new("type","INT","POINT")
-    typeAttr.data[newIndex].value = nextFreeType
+    typeAttr.data[currentAmount].value = nextFreeType
     
     # get the current max brick type index being used, and add 1 for the new brick index
     # this will define the prototype prefix on the brick object
