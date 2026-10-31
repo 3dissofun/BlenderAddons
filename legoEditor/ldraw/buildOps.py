@@ -8,6 +8,7 @@ from pathlib import Path
 
 from .importer import importer, library
 from .. import utils
+from ..pointCloud import points
 
 class LEGO_OT_ImportRandom(bpy.types.Operator):
     bl_idname = "lego.import_random"
@@ -26,6 +27,11 @@ class LEGO_OT_ImportRandom(bpy.types.Operator):
 
         brickIds = library.getAllParts()       
         brickId = random.choice(brickIds)
+        
+        points.importAsPoint(brickId)
+
+        return {'FINISHED'}
+        """
         obj = importer.getBrickMesh(brickId)
         if obj:
             duration = round(time.perf_counter() - start,4)*1000
@@ -37,6 +43,7 @@ class LEGO_OT_ImportRandom(bpy.types.Operator):
         else:
             self.report({'WARNING'},"No brick found for given ID")
             return {'CANCELLED'}
+        """
 
 class LEGO_OT_ImportBrick(bpy.types.Operator):
     bl_idname = "lego.import_brick"
@@ -113,7 +120,7 @@ class LEGO_OT_ImportLdr(bpy.types.Operator, ImportHelper):
         name = Path(self.filepath).stem
         coll = bpy.data.collections.new(name)
         context.scene.collection.children.link(coll)
-        objs = importer.importLdr(self.filepath, coll)
+        objs = importer.importLDR(self.filepath, coll)
         self.report({'INFO'}, f"Imported {len(objs)} bricks into '{coll.name}'")
         return {'FINISHED'}
 

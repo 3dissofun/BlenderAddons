@@ -14,6 +14,13 @@ def importLDR(ldrPath):
 def importMpd(mpdPath):
     pass
 
+def getBrickObj(brickMesh):
+    # returns an object for a lego piece given a mesh
+    # sets relevant attributes/transforms etc (but not for now...)
+    obj = bpy.data.objects.new(brickMesh.name,brickMesh)
+    obj.is_lego = True
+    return obj
+
 def getBrickMesh(brickId,mode="auto"):
     # returns a bpy mesh struct for a mesh given a brick ID
     # mode defines operation
