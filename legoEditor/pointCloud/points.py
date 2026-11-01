@@ -12,6 +12,7 @@ import bpy
 import numpy as np
 
 from ..ldraw.importer import importer
+from .. import utils
 
 def makeInstancerGroup():
     # Makes from scratch a geometry nodes nodegroup that instances lego bricks onto points
@@ -98,12 +99,6 @@ def getInstancingGroup():
     existing = makeInstancerGroup()
     return existing
 
-def setModifierInput(modifier, socketName, value):
-    # small helper to set modifier input sockets by name
-    identifier = next(item.identifier for item in modifier.node_group.interface.items_tree
-        if item.item_type == 'SOCKET' and item.in_out == 'INPUT' and item.name == socketName)
-    getattr(modifier.properties.inputs, identifier).value = value
-
 def importAsPoint(brickId, model="misc"):
     # method to create or extend the current models point cloud
     if not brickId.lower().endswith(".dat"):
@@ -132,7 +127,7 @@ def importAsPoint(brickId, model="misc"):
         modifier = pcObj.modifiers.new(name="LegoInstancer", type='NODES')
         nodeGroup = getInstancingGroup()
         modifier.node_group = nodeGroup
-        setModifierInput(modifier, "Collection", protoColl)
+        utils.setModifierInput(modifier, "Collection", protoColl)
     else:
         pcObj = currentPc
         pc = pcObj.data
