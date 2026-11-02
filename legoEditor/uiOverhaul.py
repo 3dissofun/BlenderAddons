@@ -4,6 +4,7 @@ import bpy
 
 from . import dimming, tools, workspace
 from .tools.base import NAV_EVENTS
+from .tools import select
 
 panelName = "LEGO"
 
@@ -43,7 +44,7 @@ class LEGO_OT_editorToggle(bpy.types.Operator):
 
         cls._active = True
         cls._stop_requested = False
-
+        self.swallowClick = False
         # The workspace switch only lands on the next event-loop pass, so the
         # LEGO viewport doesn't exist yet. The modal finishes setup (see
         # _tryActivate) once it does; the timer guarantees it gets events.
@@ -147,6 +148,12 @@ class LEGO_OT_editorToggle(bpy.types.Operator):
         if event.type.startswith("TIMER") or event.type in {"MOUSEMOVE", "INBETWEEN_MOUSEMOVE"}:
             return {"PASS_THROUGH"}
 
+        # After we handled a press, eat the rest of that click (release / click / drag)
+        # so Blender's own select doesn't run on release and undo our selection.
+        if event.type == 'LEFTMOUSE' and event.value not in {'PRESS', 'DOUBLE_CLICK'}:
+            if self.swallowClick:
+                return {'RUNNING_MODAL'}
+
         # Which area is the mouse over?
         area = next((a for a in context.window.screen.areas if _hit(a, event)), None)
         if area is None or area.as_pointer() != self.areaPtr:
@@ -158,9 +165,22 @@ class LEGO_OT_editorToggle(bpy.types.Operator):
         if region is not None and region.type != "WINDOW":
             return {"PASS_THROUGH"}  # header / sidebar / toolbar stay usable
 
+        if event.type == 'LEFTMOUSE' and event.value in {'PRESS', 'DOUBLE_CLICK'}:
+            self.swallowClick = False
+            viewRegion = region if region is not None else next(
+                (r for r in area.regions if r.type == "WINDOW"), None)
+            if viewRegion is not None:
+                mousePos = (event.mouse_x - viewRegion.x, event.mouse_y - viewRegion.y)
+                with context.temp_override(window=context.window, screen=context.window.screen,
+                                           area=area, region=viewRegion):
+                    if select.raycastAndSelect(context, event, mousePos):
+                        self.swallowClick = True
+                        return {'RUNNING_MODAL'}
+            return {'PASS_THROUGH'}  # missed: let Blender select / box-select
         # Main viewport region: navigation passes through, tools are dispatched, rest is blocked
         if event.type in NAV_EVENTS or event.type in PASS_KEYS:
             return {"PASS_THROUGH"}
+
 
         if event.value == "PRESS" and event.type in tools.KEYMAP:
             # This modal was started in the pre-switch workspace, so its own
