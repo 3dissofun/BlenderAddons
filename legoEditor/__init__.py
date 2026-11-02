@@ -10,16 +10,20 @@ bl_info = {
     "category": "Modelling",
 }
 
-from . import ldraw, ldd, props, uiOverhaul
+from . import ldraw, ldd, props
+#from . import uiOverhaul
+from . import editor
 
 def register():
     props.register()
     ldraw.register()
     ldd.register()
-    uiOverhaul.register()
+    #uiOverhaul.register()
+    editor.register()
 
 def unregister():
     ldd.unregister()
     ldraw.unregister()
-    uiOverhaul.unregister()
+    #uiOverhaul.unregister()
+    editor.unregister()
     props.unregister()
