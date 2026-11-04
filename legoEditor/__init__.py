@@ -1,5 +1,3 @@
-import bpy
-
 bl_info = {
     "name": "Lego Editor",
     "author": "Joshua Palfrey",
@@ -10,20 +8,16 @@ bl_info = {
     "category": "Modelling",
 }
 
-from . import ldraw, ldd, props
-#from . import uiOverhaul
-from . import editor
+from . import ldraw, ldd, props, operators
 
 def register():
     props.register()
     ldraw.register()
     ldd.register()
-    #uiOverhaul.register()
-    editor.register()
+    operators.register()
 
 def unregister():
     ldd.unregister()
     ldraw.unregister()
-    #uiOverhaul.unregister()
-    editor.unregister()
+    operators.unregister()
     props.unregister()
