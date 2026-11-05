@@ -1,5 +1,5 @@
 import bpy
-from bpy.props import StringProperty, FloatProperty
+from bpy.props import StringProperty, FloatProperty, BoolProperty
 from .ldraw.importer import library
 
 def onLibChange(self,context):
@@ -24,6 +24,11 @@ class LE_AddonPreferences(bpy.types.AddonPreferences):
         layout.prop(self,"blenderLdrawLibrary")
 
 def register():
+    bpy.types.Object.is_lego_model = BoolProperty(
+            name="Is Lego Model",
+            description="Marks this point cloud as a Lego model",
+            default=False,
+            )
     bpy.utils.register_class(LE_AddonPreferences)
 
 def unregister():

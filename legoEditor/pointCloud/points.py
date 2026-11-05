@@ -95,9 +95,29 @@ def getInstancingGroup():
     # otherwise it makes the nodegroup from scratch
     existing = bpy.data.node_groups.get("LegoInstancer_GN",None)
     if existing:
-        return exsiting
+        return existing
     existing = makeInstancerGroup()
     return existing
+
+def getNewPc(name):
+    # function to return a new point cloud object with relevant attributes set etc
+    # returns blenderObject,blenderModifier structs
+    # name is a string that the point cloud data and object will be called
+    pc = bpy.data.pointclouds.new(name)
+    pcObj = bpy.data.objects.new(name,pc)
+    pcObj.is_lego_model = True
+    # set the instancing node group
+    modifier = pcObj.modifiers.new(name="LegoInstancer", type='NODES')
+    nodeGroup = getInstancingGroup()
+    modifier.node_group = nodeGroup
+    
+    return pcObj, modifier
+
+def getNewProtoColl(protoCollName):
+    protoColl = bpy.data.collections.new(protoCollName)
+    protoColl.hide_viewport = True
+    protoColl.hide_render = True
+    bpy.context.scene.collection.children.link(protoColl)
 
 def importAsPoint(brickId, model="misc"):
     # method to create or extend the current models point cloud
@@ -112,21 +132,14 @@ def importAsPoint(brickId, model="misc"):
     if existing:
         protoColl = existing
     else:
-        protoColl = bpy.data.collections.new(protoCollName)
-        protoColl.hide_viewport = True
-        protoColl.hide_render = True
-        bpy.context.scene.collection.children.link(protoColl)
+        protoColl = getProtoColl(protoCollName)
 
     # get the point cloud
     currentPc = bpy.data.objects.get(model,None)
     if (currentPc is None) or (currentPc.type != 'POINTCLOUD'):
-        pc = bpy.data.pointclouds.new(model)
-        pcObj = bpy.data.objects.new(model,pc)
+        pcObj, modifier = getNewPc(model)
+        pc = pcObj.data
         bpy.context.scene.collection.objects.link(pcObj)
-        # set the instancing node group
-        modifier = pcObj.modifiers.new(name="LegoInstancer", type='NODES')
-        nodeGroup = getInstancingGroup()
-        modifier.node_group = nodeGroup
         utils.setModifierInput(modifier, "Collection", protoColl)
     else:
         pcObj = currentPc
@@ -164,9 +177,36 @@ def importAsPoint(brickId, model="misc"):
         typeAttr = pc.attributes.new("type","INT","POINT")
     typeAttr.data[currentAmount].value = nextFreeType
     
-    # get the current max brick type index being used, and add 1 for the new brick index
-    # this will define the prototype prefix on the brick object
+def importAsModel(brickIdList,positions,rotations,modelName="unnamed"):
+    # function to import a list of bricks as a model
+    # reutrns the resulting point cloud
+    brickIdList = [n if n.lower().endswith(".dat") else n + ".dat" for n in brickIdList]
 
-def importAsModel(brickIdList,modeName):
-    # method to import a list of bricks as a model
-    pass
+    # get the bricks
+    brickMeshes = [importer.getBrickMesh(brickId) for brickId in brickIdList]
+    
+    amountOfBricks = len(brickMeshes)
+    requestedAmount = len(brickIdList)
+    if amountOfBricks != requestedAmount:
+        print(f"LEGO POINTS: WARNING, Failed to import all requested bricks, missing: {requestedAmount-amountOfBricks}")
+    
+    brickPrototypes = [] # list of objects to use as instances
+    protoColl = getNewProtoColl(f"{modelName}_Prototypes")
+    for index, brickMesh in enumerate(brickMeshes):
+        brickObj = bpy.data.objects.new(f"{index:04d}",brickMesh)
+        protoColl.objects.link(brickObj)
+        brickPrototypes.append(brickObj)
+
+    pcObj, modifier = getNewPc(modelName)
+    utils.setModifierInput(modifier, "Collection", protoColl)
+    pc = pcObj.data
+    pc.resize(amountOfBricks)
+
+    typeAttr = pc.attributes.new("type","INT","POINT")
+    typeAttr.data.foreach_set("value",np.arange(amountOfBricks,dtype=np.int32))
+    rotationAttr = pc.attributes.new("rotation", 'QUATERNION', 'POINT')
+    rotationAttr.data.foreach_set("value", rotations.ravel())
+
+    pc.attributes["position"].data.foreach_set("vector", positions.ravel())
+
+    return pcObj

@@ -8,12 +8,8 @@ import bpy
 
 from . import brickMaker, blendLibrary
 
-def importLDR(ldrPath):
-    pass
-
 def importMpd(mpdPath):
-    pass
-
+    
 def getBrickObj(brickMesh):
     # returns an object for a lego piece given a mesh
     # sets relevant attributes/transforms etc (but not for now...)
@@ -77,7 +73,7 @@ def getBrickMeshes(brickIdList,mode="auto"):
         localFound = [mesh for mesh in bpy.data.meshes if mesh in brickIdList]
         if len(localFound) == numOfBricks:
             # were done
-            return localFound
+return localFound
         missing = [mesh for mesh in brickIdList if mesh not in localFound]
         output.extend(localFound)
 

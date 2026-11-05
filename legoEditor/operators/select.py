@@ -3,10 +3,18 @@ The intent of this file is to provide an override to the select operator when on
 """
 import bpy
 from bpy_extras import view3d_utils
+from bpy.props import BoolProperty, IntVectorProperty
 
 from mathutils.kdtree import KDTree
 
 from .. import utils
+
+def isLegoPointCloud(obj):
+    if obj is None:
+        return False
+    if obj.type == "POINTCLOUD" and getattr(obj,"is_lego_model",False):
+        return True
+    return False
 
 def buildTree(pointCloud):
     # returns a KD tree for a point cloud input
@@ -61,8 +69,7 @@ def pickPoint(context, mousePos):
 
     best = None
     for pcObj in context.objects_in_mode:
-        if pcObj.type != 'POINTCLOUD' or len(pcObj.data.points) == 0:
-            # future additional checks could be made here
+        if not isLegoPointCloud(pcObj) or len(pcObj.data.points) == 0:
             continue
 
         localPos = pcObj.matrix_world.inverted_safe() @ matrix.translation
@@ -95,21 +102,61 @@ def raycastAndSelect(context,event,mousePos):
     return True
 
 # Operater itself \/
-# TODO wire up operator and make keymap to hijack normal select.
-# also mark lego point clouds with a bool prop for poll
 
 class LEGO_OT_SelectInstance(bpy.types.Operator):
     bl_idname = "lego.select_instance"
     bl_label = "Select Instance"
+    bl_options = {'REGISTER','UNDO'}
 
+    extend: BoolProperty(name="Extend Selection",description="Add to the existing selection")
+    location: IntVectorProperty(name="Location",description="Mouse location in region coordinates, internal",size=2,default=(0, 0),options={'HIDDEN', 'SKIP_SAVE'},)
+
+    @classmethod
     def poll(self,context):
-        return True
+        # only hijack clicks in point cloud edit mode, in the 3D viewport,
+        # when at least one lego cloud is being edited. Returning False lets
+        # the keymap fall through to Blender's normal select.
+        if context.mode != 'EDIT_POINTCLOUD':
+            return False
+        if context.area is None or context.area.type != 'VIEW_3D':
+            return False
+        return any(isLegoPointCloud(o) for o in context.objects_in_mode)
 
-    def invoke(self,context):
+    def invoke(self,context,event):
+        if raycastAndSelect(context, tuple(self.location), extend=self.extend):
+            return {'FINISHED'}
+        # nothing hit: let the click go on to the default select operator
         return {'PASS_THROUGH'}
 
+# Keymap \/
+ 
+addon_keymaps = []
+ 
+def registerKeymap():
+    kc = bpy.context.window_manager.keyconfigs.addon
+    if kc is None:  # background mode
+        return
+ 
+    # point cloud edit mode keymap; mode keymaps run before the generic "3D View" one
+    km = kc.keymaps.new(name="Point Cloud", space_type='EMPTY')
+ 
+    kmi = km.keymap_items.new(LEGO_OT_SelectInstance.bl_idname, 'LEFTMOUSE', 'CLICK')
+    kmi.properties.extend = False
+    addon_keymaps.append((km, kmi))
+ 
+    kmi = km.keymap_items.new(LEGO_OT_SelectInstance.bl_idname, 'LEFTMOUSE', 'CLICK', shift=True)
+    kmi.properties.extend = True
+    addon_keymaps.append((km, kmi))
+ 
+def unregisterKeymap():
+    for km, kmi in addon_keymaps:
+        km.keymap_items.remove(kmi)
+    addon_keymaps.clear()
+ 
 def register():
     bpy.utils.register_class(LEGO_OT_SelectInstance)
-
+    registerKeymap()
+ 
 def unregister():
+    unregisterKeymap()
     bpy.utils.unregister_class(LEGO_OT_SelectInstance)
