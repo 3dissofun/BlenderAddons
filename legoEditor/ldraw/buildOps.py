@@ -120,14 +120,13 @@ class LEGO_OT_ImportLdr(bpy.types.Operator, ImportHelper):
         name = Path(self.filepath).stem
         coll = bpy.data.collections.new(name)
         context.scene.collection.children.link(coll)
-        objs = importer.importMpd(self.filepath, coll)
-        self.report({'INFO'}, f"Imported {len(objs)} bricks into '{coll.name}'")
+        importer.importMpd(self.filepath, coll)
         return {'FINISHED'}
 
 classes = (LEGO_OT_ImportBrick, LEGO_OT_ImportRandom, LEGO_OT_DebugSnaps, LEGO_OT_ImportLdr)
 
 def importMenu(self, context):
-    self.layout.operator(LEGO_OT_ImportLdr.bl_idname, text="LEGO LDR file (.ldr)")
+    self.layout.operator(LEGO_OT_ImportLdr.bl_idname, text="LEGO LDR/MPD file (.ldr/.mpd)")
 
 def objectMenu(self, context):
     # 3D Viewport > Object menu; greyed out unless the active object is a brick

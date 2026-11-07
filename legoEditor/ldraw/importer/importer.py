@@ -6,17 +6,28 @@ Making a brick means calling brickMaker.py and building the brick from source .d
 """
 import bpy
 
+import numpy as np
+
 from . import brickMaker, blendLibrary, parseMpd
+from ...pointCloud import points
+from ... import utils
 
 def importMpd(mpdPath,collection):
     allModels = parseMpd.parseMpd(mpdPath)
-    modelNames, partNames, tables = buildModelTables(allModels)
-    for index, modelName in enumerate(modelNames):
-        modelTable = tables[index]
-        kinds = modelTable["kind"]
-        partData = {k: v[~kinds] for k, v in modelTable.items()} # parts, becomes point data directly
-        modelData = {k: v[kinds] for k, v in modelTable.items()} # submodels, references on where to place other mdoels
-    
+    modelNames, partNames, tables = parseMpd.buildModelTables(allModels)
+    protoColl = bpy.data.collections.new(f"{modelNames[0]}_Prototypes")
+    for i,part in enumerate(partNames):
+        brickMesh = getBrickMesh(part)
+        if brickMesh is None:
+            print(f"LDRAW: WARNING, could not build {part}, using an empty placeholder")
+        brickObj = bpy.data.objects.new(f"{i:05d}", brickMesh)  # None -> empty object
+        protoColl.objects.link(brickObj)
+
+    pcData = [] # list of indexed point cloud data relating to indexed models NOTE for models that are just references to other models, this will be empty
+    for modelId, table in enumerate(tables):
+        pc = points.makePointCloudData(modelNames[modelId], table)
+        pcObj, modifier = points.getNewPc(str(modelId),pc,protoColl)
+        collection.objects.link(pcObj)
 
 def getBrickObj(brickMesh):
     # returns an object for a lego piece given a mesh

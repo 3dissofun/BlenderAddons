@@ -1,7 +1,5 @@
-from . import lddOps
-
 def register():
-    lddOps.register()
+    pass
     
 def unregister():
-    lddOps.unregister()
+    pass

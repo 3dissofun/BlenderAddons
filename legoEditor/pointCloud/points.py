@@ -99,18 +99,23 @@ def getInstancingGroup():
     existing = makeInstancerGroup()
     return existing
 
-def getNewPc(name):
+def getNewPc(name,pc=None,protoColl=None):
     # function to return a new point cloud object with relevant attributes set etc
     # returns blenderObject,blenderModifier structs
     # name is a string that the point cloud data and object will be called
-    pc = bpy.data.pointclouds.new(name)
+    # pc is an optional data input for the point cloud data
+    # protoColl is an optional collection data input for the modifier
+    if pc is None:
+        pc = bpy.data.pointclouds.new(name)
     pcObj = bpy.data.objects.new(name,pc)
     pcObj.is_lego_model = True
     # set the instancing node group
     modifier = pcObj.modifiers.new(name="LegoInstancer", type='NODES')
     nodeGroup = getInstancingGroup()
     modifier.node_group = nodeGroup
-    
+    if protoColl is not None:
+        utils.setModifierInput(modifier, "Collection", protoColl)
+
     return pcObj, modifier
 
 def getNewProtoColl(protoCollName):
@@ -176,43 +181,30 @@ def importAsPoint(brickId, model="misc"):
     if typeAttr is None:
         typeAttr = pc.attributes.new("type","INT","POINT")
     typeAttr.data[currentAmount].value = nextFreeType
+
+def makePointCloudData(name,modelTable):
+    # function to take in a name and a modelTable dict, this works as a core function of importMpd
+    # converting model table matricies and types into positions/rotations and attributes
+    # returns a bpy data pointcloud struct
+    parts = ~modelTable["kind"] # kind is true for models, so we invert it
+    types = modelTable["index"][parts]
+    amount = len(types)
+
+    pc = bpy.data.pointclouds.new(name)
+    pc.resize(amount)
+    if amount == 0:
+        # this is the case for models that only place other submodels
+        return pc
     
-def
+    matrices = modelTable["matrix"][parts]
+    positions = matrices[:, :3, 3].astype(np.float32)
+    rotations = utils.matricesToQuaternions(matrices)
 
-def importAsModel(brickIdList,matrix,modelName="unnamed"):
-    # function to import a list of bricks as a model
-    # reutrns the resulting point cloud
-    brickIdList = [n if n.lower().endswith(".dat") else n + ".dat" for n in brickIdList]
-
-    # get the bricks
-    brickMeshes = [importer.getBrickMesh(brickId) for brickId in brickIdList]
-    
-    amountOfBricks = len(brickMeshes)
-    requestedAmount = len(brickIdList)
-    if amountOfBricks != requestedAmount:
-        print(f"LEGO POINTS: WARNING, Failed to import all requested bricks, missing: {requestedAmount-amountOfBricks}")
-    
-    brickPrototypes = [] # list of objects to use as instances
-    protoColl = getNewProtoColl(f"{modelName}_Prototypes")
-    for index, brickMesh in enumerate(brickMeshes):
-        brickObj = bpy.data.objects.new(f"{index:05d}",brickMesh)
-        protoColl.objects.link(brickObj)
-        brickPrototypes.append(brickObj)
-
-    pcObj, modifier = getNewPc(modelName)
-    utils.setModifierInput(modifier, "Collection", protoColl)
-    pc = pcObj.data
-    pc.resize(amountOfBricks)
-
-    typeAttr = pc.attributes.new("type","INT","POINT")
-    typeAttr.data.foreach_set("value",np.arange(amountOfBricks,dtype=np.int32))
-
-    # seperate matrix into positions and rotations
-    positions = []
-    rotations = []
-
-    rotationAttr = pc.attributes.new("rotation", 'QUATERNION', 'POINT')
-    rotationAttr.data.foreach_set("value", rotations.ravel())
     pc.attributes["position"].data.foreach_set("vector", positions.ravel())
+    pc.attributes.new("type", "INT", "POINT").data.foreach_set("value", types)
+    pc.attributes.new("rotation", "QUATERNION", "POINT").data.foreach_set("value", rotations.ravel())
+    pc.attributes.new("colour", "INT", "POINT").data.foreach_set("value", modelTable["colour"][parts])
+    pc.attributes.new("step", "INT", "POINT").data.foreach_set("value", modelTable["step"][parts])
+    return pc
 
-    return pcObj
+
