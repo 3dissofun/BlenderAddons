@@ -109,7 +109,7 @@ class LEGO_OT_DebugSnaps(bpy.types.Operator):
 
 class LEGO_OT_ImportLdr(bpy.types.Operator, ImportHelper):
     bl_idname = "lego.import_ldr"
-    bl_label = "Import LDR"
+    bl_label = "Import LDR/MPD"
     bl_description = "Import a lego (.ldr/.mpd) model"
     bl_options = {'REGISTER','UNDO'}
 
@@ -120,7 +120,7 @@ class LEGO_OT_ImportLdr(bpy.types.Operator, ImportHelper):
         name = Path(self.filepath).stem
         coll = bpy.data.collections.new(name)
         context.scene.collection.children.link(coll)
-        objs = importer.importLDR(self.filepath, coll)
+        objs = importer.importMpd(self.filepath, coll)
         self.report({'INFO'}, f"Imported {len(objs)} bricks into '{coll.name}'")
         return {'FINISHED'}
 

@@ -6,11 +6,18 @@ Making a brick means calling brickMaker.py and building the brick from source .d
 """
 import bpy
 
-from . import brickMaker, blendLibrary
+from . import brickMaker, blendLibrary, parseMpd
 
-def importMpd(mpdPath):
-    raise NotImplementedError("Come back later!")
+def importMpd(mpdPath,collection):
+    allModels = parseMpd.parseMpd(mpdPath)
+    modelNames, partNames, tables = buildModelTables(allModels)
+    for index, modelName in enumerate(modelNames):
+        modelTable = tables[index]
+        kinds = modelTable["kind"]
+        partData = {k: v[~kinds] for k, v in modelTable.items()} # parts, becomes point data directly
+        modelData = {k: v[kinds] for k, v in modelTable.items()} # submodels, references on where to place other mdoels
     
+
 def getBrickObj(brickMesh):
     # returns an object for a lego piece given a mesh
     # sets relevant attributes/transforms etc (but not for now...)
@@ -74,7 +81,7 @@ def getBrickMeshes(brickIdList,mode="auto"):
         localFound = [mesh for mesh in bpy.data.meshes if mesh in brickIdList]
         if len(localFound) == numOfBricks:
             # were done
-return localFound
+            return localFound
         missing = [mesh for mesh in brickIdList if mesh not in localFound]
         output.extend(localFound)
 

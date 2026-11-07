@@ -177,7 +177,9 @@ def importAsPoint(brickId, model="misc"):
         typeAttr = pc.attributes.new("type","INT","POINT")
     typeAttr.data[currentAmount].value = nextFreeType
     
-def importAsModel(brickIdList,positions,rotations,modelName="unnamed"):
+def
+
+def importAsModel(brickIdList,matrix,modelName="unnamed"):
     # function to import a list of bricks as a model
     # reutrns the resulting point cloud
     brickIdList = [n if n.lower().endswith(".dat") else n + ".dat" for n in brickIdList]
@@ -193,7 +195,7 @@ def importAsModel(brickIdList,positions,rotations,modelName="unnamed"):
     brickPrototypes = [] # list of objects to use as instances
     protoColl = getNewProtoColl(f"{modelName}_Prototypes")
     for index, brickMesh in enumerate(brickMeshes):
-        brickObj = bpy.data.objects.new(f"{index:04d}",brickMesh)
+        brickObj = bpy.data.objects.new(f"{index:05d}",brickMesh)
         protoColl.objects.link(brickObj)
         brickPrototypes.append(brickObj)
 
@@ -204,9 +206,13 @@ def importAsModel(brickIdList,positions,rotations,modelName="unnamed"):
 
     typeAttr = pc.attributes.new("type","INT","POINT")
     typeAttr.data.foreach_set("value",np.arange(amountOfBricks,dtype=np.int32))
+
+    # seperate matrix into positions and rotations
+    positions = []
+    rotations = []
+
     rotationAttr = pc.attributes.new("rotation", 'QUATERNION', 'POINT')
     rotationAttr.data.foreach_set("value", rotations.ravel())
-
     pc.attributes["position"].data.foreach_set("vector", positions.ravel())
 
     return pcObj
