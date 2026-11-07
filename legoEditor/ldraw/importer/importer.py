@@ -9,6 +9,7 @@ import bpy
 from . import brickMaker, blendLibrary
 
 def importMpd(mpdPath):
+    raise NotImplementedError("Come back later!")
     
 def getBrickObj(brickMesh):
     # returns an object for a lego piece given a mesh
