@@ -203,7 +203,8 @@ def makePointCloudData(name,modelTable):
     pc.attributes["position"].data.foreach_set("vector", positions.ravel())
     pc.attributes.new("type", "INT", "POINT").data.foreach_set("value", types)
     pc.attributes.new("rotation", "QUATERNION", "POINT").data.foreach_set("value", rotations.ravel())
-    pc.attributes.new("colour", "INT", "POINT").data.foreach_set("value", modelTable["colour"][parts])
+    pc.attributes.new("col", "INT", "POINT").data.foreach_set("value", modelTable["colour"][parts])
+    pc.attributes.new("colExists", "BOOLEAN", "POINT").data.foreach_set("value", np.ones(amount,dtype=bool))
     pc.attributes.new("step", "INT", "POINT").data.foreach_set("value", modelTable["step"][parts])
     return pc
 

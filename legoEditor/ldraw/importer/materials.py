@@ -32,34 +32,67 @@ def getShaderGroup():
  
     return bpy.data.node_groups.get(SHADER_GROUP)
  
+def _mixInput(mixNode, identifier):
+    # ShaderNodeMix has several sockets with the same name (one set per data type),
+    # so look them up by their unique identifier instead
+    return next(s for s in mixNode.inputs if s.identifier == identifier)
+
 def _newMaterial(name):
-    # Fresh node material; returns (material, nodes, links, group node, col attribute node)
+    # Fresh node material; returns (material, nodes, links, group node, face col attribute node)
     # groupNode is None if the node group couldn't be loaded, in which case the
     # material falls back to a plain principled BSDF driven by the colour attribute.
     mat = bpy.data.materials.new(name)
     mat.use_nodes = True
     nodes, links = mat.node_tree.nodes, mat.node_tree.links
     bsdf = next(n for n in nodes if n.type == 'BSDF_PRINCIPLED')
- 
+
+    # Face colour code from the mesh itself
     attr = nodes.new("ShaderNodeAttribute")
     attr.attribute_type = 'GEOMETRY'
     attr.attribute_name = "col"
- 
+
     group = getShaderGroup()
     if group is None:
         attr.location = (bsdf.location.x - 500, bsdf.location.y)
         links.new(attr.outputs["Color"], bsdf.inputs["Base Color"])
         return mat, nodes, links, None, attr
- 
+
     groupNode = nodes.new("ShaderNodeGroup")
     groupNode.node_tree = group
     groupNode.location = bsdf.location
-    attr.location = (groupNode.location.x - 500, groupNode.location.y)
- 
-    # "col" is an int attribute, which the Attribute node exposes as Fac (float)
+    x, y = groupNode.location.x, groupNode.location.y
+
+    # Brick colour code from the instance (point attribute on the point cloud)
+    instAttr = nodes.new("ShaderNodeAttribute")
+    instAttr.attribute_type = 'INSTANCER'
+    instAttr.attribute_name = "col"
+
+    # 1 where the face code is 16 (inherit), 0 otherwise.
+    # Codes are whole numbers, so an epsilon of 0.5 matches exactly 16.
+    isInherit = nodes.new("ShaderNodeMath")
+    isInherit.operation = 'COMPARE'
+    isInherit.inputs[1].default_value = 16.0
+    isInherit.inputs[2].default_value = 0.5
+
+    # Face code where it has its own colour, brick code where it's 16
+    mix = nodes.new("ShaderNodeMix")
+    mix.data_type = 'FLOAT'
+    mix.clamp_factor = True
+
+    attr.location = (x - 800, y + 100)
+    instAttr.location = (x - 800, y - 150)
+    isInherit.location = (x - 550, y + 150)
+    mix.location = (x - 300, y)
+
+    # int attributes come through the Attribute node's Fac output as floats
+    links.new(attr.outputs["Fac"], isInherit.inputs[0])
+    links.new(isInherit.outputs["Value"], _mixInput(mix, "Factor_Float"))
+    links.new(attr.outputs["Fac"], _mixInput(mix, "A_Float"))
+    links.new(instAttr.outputs["Fac"], _mixInput(mix, "B_Float"))
+
     codeSocket = groupNode.inputs["Col Code"]
-    links.new(attr.outputs["Fac" if codeSocket.type == 'VALUE' else "Color"], codeSocket)
- 
+    links.new(mix.outputs["Result"], codeSocket)
+
     # Shader output goes straight to the surface; anything else feeds Base Color
     out = groupNode.outputs[0]
     if out.type == 'SHADER':
@@ -68,9 +101,9 @@ def _newMaterial(name):
         nodes.remove(bsdf)
     else:
         links.new(out, bsdf.inputs["Base Color"])
- 
-    return mat, nodes, links, groupNode, attr
- 
+
+    return mat, nodes, links, groupNode, attr 
+
 def getSharedMaterial():
     # One material for every untextured face of every brick
     mat = bpy.data.materials.get("LEGO_MAT")

@@ -14,7 +14,6 @@ def getLibrary():
         blenderLdrawLib = libDir
         return libDir
     else:
-        print("LDRAW IMPORTER: WARNING, Library get called but no library is set in addon preferences")
         return None
 
 def getLibMeshes(meshList):

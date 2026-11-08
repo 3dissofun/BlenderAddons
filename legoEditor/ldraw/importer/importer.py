@@ -7,27 +7,72 @@ Making a brick means calling brickMaker.py and building the brick from source .d
 import bpy
 
 import numpy as np
+from math import radians
+from mathutils import Matrix
+import tempfile
+from pathlib import Path
 
-from . import brickMaker, blendLibrary, parseMpd
+from . import brickMaker, blendLibrary, parseMpd, library
 from ...pointCloud import points
 from ... import utils
 
-def importMpd(mpdPath,collection):
+def unpackMpd(allModels, outDir):
+    # Writes each embedded part block to outDir, using its normalised name as the path
+    for name, lines in allModels.items():
+        if not name.endswith(".dat"):
+            continue
+        path = Path(outDir) / name  # "s/10243 - 60616s01.dat" -> s/ subfolder
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("\n".join(" ".join(tokens) for tokens in lines) + "\n", encoding="utf-8")
+
+def importMpd(mpdPath, collection, scale=1.0):
     allModels = parseMpd.parseMpd(mpdPath)
     modelNames, partNames, tables = parseMpd.buildModelTables(allModels)
-    protoColl = bpy.data.collections.new(f"{modelNames[0]}_Prototypes")
-    for i,part in enumerate(partNames):
-        brickMesh = getBrickMesh(part)
-        if brickMesh is None:
-            print(f"LDRAW: WARNING, could not build {part}, using an empty placeholder")
-        brickObj = bpy.data.objects.new(f"{i:05d}", brickMesh)  # None -> empty object
-        protoColl.objects.link(brickObj)
 
-    pcData = [] # list of indexed point cloud data relating to indexed models NOTE for models that are just references to other models, this will be empty
-    for modelId, table in enumerate(tables):
-        pc = points.makePointCloudData(modelNames[modelId], table)
-        pcObj, modifier = points.getNewPc(str(modelId),pc,protoColl)
-        collection.objects.link(pcObj)
+    allModels = parseMpd.parseMpd(mpdPath)
+    modelNames, partNames, tables = parseMpd.buildModelTables(allModels)
+
+    overlay = tempfile.mkdtemp(prefix="ldraw_mpd_")
+    unpackMpd(allModels, overlay)
+    library.setOverlay(overlay)
+    try:
+        protoColl = bpy.data.collections.new(f"{modelNames[0]}_Prototypes")
+        for i, part in enumerate(partNames):
+            brickMesh = getBrickMesh(part)
+            if brickMesh is None:
+                print(f"LDRAW: WARNING, could not build {part}, using an empty placeholder")
+            brickObj = bpy.data.objects.new(f"{i:05d}", brickMesh)
+            protoColl.objects.link(brickObj)
+
+        # Stage 1: each model's point cloud data, built once (index = model id)
+        pcData = [points.makePointCloudData(modelNames[i], t) for i, t in enumerate(tables)]
+
+        # Stage 2: one object per placement, parented down the tree
+        def place(modelId, parentObj, matrix, colour, stepOffset):
+            pcObj, modifier = points.getNewPc(modelNames[modelId], pcData[modelId], protoColl)
+            collection.objects.link(pcObj)
+            pcObj.parent = parentObj
+            pcObj.matrix_basis = Matrix(matrix.tolist())  # relative to the parent
+
+            # Once the node group has these inputs:
+            # utils.setModifierInput(modifier, "InheritColour", colour)
+            # utils.setModifierInput(modifier, "StepOffset", stepOffset)
+
+            t = tables[modelId]
+            isModel = t["kind"]
+            for childId, m, c, s in zip(t["index"][isModel], t["matrix"][isModel],
+                                        t["colour"][isModel], t["step"][isModel]):
+                childColour = colour if c == 16 else int(c)  # 16 = take the parent's colour
+                place(int(childId), pcObj, m, childColour, stepOffset + int(s))
+            return pcObj
+
+        root = place(0, None, np.eye(4), 16, 0)
+
+        # LDraw is -Y up, Blender is Z up
+        root.matrix_basis = Matrix.Rotation(radians(-90), 4, 'X') @ Matrix.Scale(scale, 4)
+    finally:
+        library.setOverlay(None)
+    return root
 
 def getBrickObj(brickMesh):
     # returns an object for a lego piece given a mesh
