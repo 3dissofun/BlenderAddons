@@ -6,6 +6,7 @@ from bpy_extras import view3d_utils
 from bpy.props import BoolProperty, IntVectorProperty
 
 from mathutils.kdtree import KDTree
+from mathutils import Quaternion
 
 from .. import utils
 
@@ -50,8 +51,25 @@ def selectPoint(pointCloud, index, extend=False):
     attr.data.foreach_set("value", values)
     pointCloud.update_tag()
 
+def getHitType(obj):
+    # prototypes are named with a 5 digit type prefix, e.g. "00005"
+    if obj is None:
+        return None
+    try:
+        return int(obj.original.name[:5])
+    except ValueError:
+        return None
+
+def readAttr(pointCloud, name, width):
+    attr = pointCloud.attributes.get(name)
+    if attr is None:
+        return None
+    vals = [0] * (len(pointCloud.points) * width)
+    key = "value"
+    attr.data.foreach_get(key, vals)
+    return vals
+
 def pickPoint(context, mousePos):
-    # raycast to the object under the mouse, if its a lego model point cloud
     region = context.region
     rv3d = context.region_data
     if region is None or rv3d is None:
@@ -67,37 +85,56 @@ def pickPoint(context, mousePos):
     if not hit:
         return None
 
-    best = None
+    hitType = getHitType(obj)
+
     for pcObj in context.objects_in_mode:
         if not isLegoPointCloud(pcObj) or len(pcObj.data.points) == 0:
             continue
+        pc = pcObj.data
 
-        localPos = pcObj.matrix_world.inverted_safe() @ matrix.translation
-        scaleFac = utils.getModifierInput(pcObj, "LegoInstancer", "ScaleFactor")
-        if not scaleFac:
-            scaleFac = 1.0
-        query = localPos / scaleFac
+        localMat = pcObj.matrix_world.inverted_safe() @ matrix
+        scaleFac = utils.getModifierInput(pcObj, "LegoInstancer", "ScaleFactor") or 1.0
+        query = localMat.translation / scaleFac
+        hitRot = localMat.to_3x3().normalized().to_quaternion()
 
-        coord, index, dist = buildTree(pcObj.data).find(query)
-        if index is not None and dist < 0.001 and (best is None or dist < best[2]):
-            best = (pcObj, index, dist)
+        candidates = [i for (_, i, _) in buildTree(pc).find_range(query, 0.001)]
+        if not candidates:
+            continue
 
-    if best is None:
-        return None
-    return best[0], best[1]
+        # narrow by brick type
+        types = readAttr(pc, "type", 1)
+        if types is not None and hitType is not None:
+            byType = [i for i in candidates if types[i] == hitType]
+            candidates = byType or candidates
 
-def raycastAndSelect(context,event,mousePos):
+        # narrow by rotation (q and -q are the same rotation, hence abs)
+        rots = readAttr(pc, "rotation", 4)
+        if rots is not None and len(candidates) > 1:
+            byRot = [i for i in candidates
+                     if abs(Quaternion(rots[i*4:i*4+4]).dot(hitRot)) > 0.9999]
+            candidates = byRot or candidates
+
+        # still tied = genuinely identical duplicates; cycle through them
+        if len(candidates) > 1:
+            sel = readAttr(pc, ".selection", 1)
+            if sel is not None:
+                selected = [i for i in candidates if sel[i]]
+                if selected:
+                    last = candidates.index(selected[-1])
+                    return pcObj, candidates[(last + 1) % len(candidates)]
+
+        return pcObj, candidates[0]
+
+    return None
+def raycastAndSelect(context, mousePos, extend=False):
     # select the point if in edit mode, return True
-    # if no lego is hit, return False, this means modals should call PASS_THROUGH on False return
-    if mousePos is None:
-        mousePos = (event.mouse_region_x, event.mouse_region_y)
-
+    # if no lego is hit, return False
     result = pickPoint(context, mousePos)
     if result is None:
         return False
 
     pcObj, index = result
-    selectPoint(pcObj.data, index, extend=event.shift)
+    selectPoint(pcObj.data, index, extend=extend)
     context.area.tag_redraw()
     return True
 
@@ -122,8 +159,10 @@ class LEGO_OT_SelectInstance(bpy.types.Operator):
             return False
         return any(isLegoPointCloud(o) for o in context.objects_in_mode)
 
-    def invoke(self,context,event):
-        if raycastAndSelect(context, tuple(self.location), extend=self.extend):
+    def invoke(self, context, event):
+        mousePos = (event.mouse_region_x, event.mouse_region_y)
+        self.location = mousePos
+        if raycastAndSelect(context, mousePos, extend=self.extend):
             return {'FINISHED'}
         # nothing hit: let the click go on to the default select operator
         return {'PASS_THROUGH'}

@@ -89,6 +89,7 @@ def makeBrickMesh(brickId):
         uvs[texLoops, 1] = 1.0 - uvs[texLoops, 1]  # LDraw image origin is top-left
         mesh.uv_layers.new(name="UVMap").data.foreach_set("uv", uvs.ravel())
 
+    """
     # Weld the per-face verts so shading behaves (UVs and face attributes survive)
     bm = bmesh.new()
     bm.from_mesh(mesh)
@@ -98,4 +99,5 @@ def makeBrickMesh(brickId):
 
     mesh.validate()
     mesh.update()
+    """
     return mesh 

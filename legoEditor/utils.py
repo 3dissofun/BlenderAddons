@@ -89,3 +89,28 @@ def matricesToQuaternions(matrices):
  
     quats /= np.linalg.norm(quats, axis=1, keepdims=True)
     return quats.astype(np.float32)
+
+import cProfile
+import pstats
+import io
+
+def profileCall(func, *args, statsPath=None, top=30, **kwargs):
+    # Runs func(*args, **kwargs) under cProfile and prints the slowest functions.
+    # Returns whatever func returns.
+    profiler = cProfile.Profile()
+    profiler.enable()
+    try:
+        result = func(*args, **kwargs)
+    finally:
+        profiler.disable()
+
+    if statsPath:
+        profiler.dump_stats(statsPath)  # keep the raw data for a closer look later
+
+    for sortKey in ("tottime", "cumulative"):
+        buffer = io.StringIO()
+        stats = pstats.Stats(profiler, stream=buffer).strip_dirs().sort_stats(sortKey)
+        stats.print_stats(top)
+        print(f"\n===== sorted by {sortKey} =====")
+        print(buffer.getvalue())
+    return result
