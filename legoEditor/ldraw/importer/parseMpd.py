@@ -1,46 +1,45 @@
 import numpy as np
+from pathlib import Path
 
 def normaliseName(name):
     # returns a lowercase string with slashes replaced as per ldraw standards
     return name.strip().lower().replace("\\", "/")
 
 def parseMpd(file):
-    # function to take an mpd file and return model->line block defining it,
-    with open(file,"r",encoding="utf-8-sig") as f:
+    # Returns {model name: [line tokens]}, main model first.
+    # Lines before any "0 FILE" (a plain .ldr, or an unwrapped main model)
+    # belong to a model named after the file.
+    with open(file, "r", encoding="utf-8-sig") as f:
         lines = f.readlines()
 
-    allModels = {}
-    currentModel = "unnamed"
+    default = normaliseName(Path(file).name)
+    allModels = {default: []}
+    currentModel = default
 
     for l in lines:
-        if not l.strip(): # Blank lines allowed
-            continue
-        orgLine = l
-        l = l.lstrip().strip("\n") # Remove leading whitespace, allowed in specification
-        lType = int(l[0]) # Integer defining the line type according to ldraw
-        lArgs = l[1:].lstrip().split()
-        argC = len(lArgs)
-
-        if not lArgs:
+        tokens = l.split()
+        if not tokens:
             continue
 
-        match lType:
-            case 0:
-                if lArgs[0] == "FILE":
-                    if argC < 2:
-                        continue
-                    modelName = normaliseName(" ".join(lArgs[1:]))
-                    if modelName in allModels:
-                        # spec defines first model name wins
-                        continue
+        if tokens[0] == "0" and len(tokens) > 1:
+            if tokens[1] == "FILE":
+                if len(tokens) < 3:
+                    continue
+                if currentModel == default and not allModels[default]:
+                    del allModels[default]          # nothing came before the first FILE
+                modelName = normaliseName(" ".join(tokens[2:]))
+                if modelName in allModels:
+                    currentModel = None             # spec: first model with a name wins, skip this block
+                else:
                     currentModel = modelName
-                    allModels[currentModel] = [] # list of lines relating to the model
+                    allModels[currentModel] = []
+                continue
+            if tokens[1] == "NOFILE":
+                currentModel = None                 # e.g. !DATA blocks follow, not model lines
+                continue
 
-                elif currentModel != "unnamed":
-                    allModels[currentModel].append(orgLine.split())
-            
-            case 1 | 3 | 4:
-                allModels[currentModel].append(orgLine.split())
+        if currentModel is not None and tokens[0] in "012345":
+            allModels[currentModel].append(tokens)  # keep 2/5 so embedded parts keep edges
 
     return allModels
 
