@@ -108,6 +108,48 @@ def buildModelTables(allModels):
  
     return modelNames, partNames, tables
 
+def flattenTables(tables, rootId=0):
+    # Expands the model tree into ONE table of parts, in the root model's space.
+    # Same layout as a buildModelTables table, but every row is a part (kind False),
+    # with matrices composed, colour 16 resolved, and steps offset.
+    root = tables[rootId]
+    mats, idx, cols, steps = [], [], [], []
+
+    def walk(modelId, matrix, colour, stepOffset, stack):
+        if modelId in stack:
+            print(f"LDRAW: WARNING, recursive sub-model {modelId} skipped")
+            return
+        stack = stack + (modelId,)
+        t = tables[modelId]
+        isModel = t["kind"]
+        isPart = ~isModel
+
+        if isPart.any():
+            mats.append(matrix @ t["matrix"][isPart])   # (4,4) @ (n,4,4) broadcasts
+            idx.append(t["index"][isPart])
+            c = t["colour"][isPart]
+            cols.append(np.where(c == 16, colour, c).astype(c.dtype))
+            steps.append(t["step"][isPart] + stepOffset)
+
+        for childId, m, c, s in zip(t["index"][isModel], t["matrix"][isModel],
+                                    t["colour"][isModel], t["step"][isModel]):
+            walk(int(childId), matrix @ m,
+                 colour if c == 16 else int(c), stepOffset + int(s), stack)
+
+    walk(rootId, np.eye(4), 16, 0, ())
+
+    def cat(parts, like, shape=()):
+        return np.concatenate(parts) if parts else np.empty((0, *shape), like.dtype)
+
+    index = cat(idx, root["index"])
+    return {
+        "kind":   np.zeros(len(index), dtype=bool),
+        "index":  index,
+        "matrix": cat(mats, root["matrix"], (4, 4)),
+        "colour": cat(cols, root["colour"]),
+        "step":   cat(steps, root["step"]),
+    }
+
 if __name__ == "__main__":
     allModels = parseMpd(r"C:\Users\User\Desktop\Projects\Lego_Project\Models\Modular buildings\10243 - Parisian Restaurant.mpd")
     modelNames, partNames, tables = buildModelTables(allModels)

@@ -19,6 +19,7 @@
 
 #include "geometry.hpp"
 #include "library.hpp"
+#include "snap.hpp"
 #include "texmap.hpp"
 
 #include <list>
@@ -42,6 +43,7 @@ using EdgeList = std::vector<Edge>;
 struct Geometry {
     FaceList faces;
     EdgeList edges;
+    std::vector<RawSnap> snaps; // unresolved: resolveSnaps() at the top-level part
 };
 
 struct TextureEntry {
@@ -60,7 +62,10 @@ struct FlattenStats {
 
 class Flattener {
 public:
-    Flattener(const Library& lib, size_t cacheBudgetBytes);
+    // shadow may be null (no snaps). collectGeometry = false skips faces and edges
+    // entirely, for a snaps-only pass.
+    Flattener(const Library& lib, size_t cacheBudgetBytes, ShadowLibrary* shadow = nullptr,
+              bool collectGeometry = true);
 
     // Fully flattened faces and edge lines of a file in its local space.
     std::shared_ptr<const Geometry> flatten(const fs::path& file);
@@ -80,6 +85,8 @@ private:
     void cachePut(const std::string& key, std::shared_ptr<const Geometry> geom);
 
     const Library& lib_;
+    ShadowLibrary* shadow_;
+    bool collectGeometry_;
 
     struct CacheEntry {
         std::shared_ptr<const Geometry> geom;

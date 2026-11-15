@@ -14,6 +14,8 @@ add_executable(ldcompile
     src/parser.cpp
     src/texmap.cpp
     src/blob.cpp
+    src/snap.cpp
+    src/snapfile.cpp
 )
 
 if(MSVC)

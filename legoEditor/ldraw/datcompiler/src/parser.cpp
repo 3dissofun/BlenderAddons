@@ -117,8 +117,8 @@ void applyTex(Face& f, const Vec3* pts, const TexMap& t) {
 
 } // namespace
 
-Flattener::Flattener(const Library& lib, size_t cacheBudgetBytes)
-    : lib_(lib), cacheBudget_(cacheBudgetBytes) {}
+Flattener::Flattener(const Library& lib, size_t cacheBudgetBytes, ShadowLibrary* shadow, bool collectGeometry)
+    : lib_(lib), shadow_(shadow), collectGeometry_(collectGeometry), cacheBudget_(cacheBudgetBytes) {}
 
 // ---------------------------------------------------------------------------
 // Cache
@@ -132,7 +132,8 @@ std::shared_ptr<const Geometry> Flattener::cacheGet(const std::string& key) {
 }
 
 void Flattener::cachePut(const std::string& key, std::shared_ptr<const Geometry> geom) {
-    const size_t bytes = geom->faces.size() * sizeof(Face) + geom->edges.size() * sizeof(Edge) + key.size() + 64;
+    const size_t bytes = geom->faces.size() * sizeof(Face) + geom->edges.size() * sizeof(Edge) +
+                         geom->snaps.size() * sizeof(RawSnap) + key.size() + 64;
     lru_.push_front(key);
     cache_[key] = {std::move(geom), lru_.begin(), bytes};
     cacheBytes_ += bytes;
@@ -165,6 +166,7 @@ std::shared_ptr<const Geometry> Flattener::flatten(const fs::path& file) {
     parseInto(file, *geom);
     geom->faces.shrink_to_fit();
     geom->edges.shrink_to_fit();
+    geom->snaps.shrink_to_fit();
 
     inProgress_.erase(key);
     ++stats_.filesParsed;
@@ -391,6 +393,13 @@ void Flattener::parseInto(const fs::path& file, Geometry& out) {
                 out.faces.push_back(f);
             }
 
+            // Snaps: accumulate the matrix; rules are enforced once, at the top-level part
+            if (!child->snaps.empty()) {
+                const Affine am = Affine::from(m);
+                out.snaps.reserve(out.snaps.size() + child->snaps.size());
+                for (const RawSnap& cs : child->snaps) out.snaps.push_back({cs.def, am * cs.acc});
+            }
+
             // Edge lines have no winding, just transform them
             out.edges.reserve(out.edges.size() + child->edges.size());
             for (const Edge& ce : child->edges) {
@@ -410,6 +419,7 @@ void Flattener::parseInto(const fs::path& file, Geometry& out) {
 
         case 3:
         case 4: {
+            if (!collectGeometry_) { invertNext = false; break; }
             const int n = type;
             if (tok.size() < static_cast<size_t>(2 + 3 * n)) {
                 warnLine(file, lineNo, "face line has too few fields");
@@ -450,6 +460,7 @@ void Flattener::parseInto(const fs::path& file, Geometry& out) {
         }
 
         case 2: { // edge line: marks a hard edge
+            if (!collectGeometry_) { invertNext = false; break; }
             if (tok.size() < 8) {
                 warnLine(file, lineNo, "edge line has too few fields");
                 ++stats_.badLines;
@@ -472,6 +483,28 @@ void Flattener::parseInto(const fs::path& file, Geometry& out) {
         default: // 5 (conditional lines) mark smooth silhouettes: not needed
             invertNext = false;
             break;
+        }
+    }
+
+    // This file's shadow info (applyShadow): runs after its subfiles, so SNAP_CLEAR
+    // only removes inherited snaps, then the file's own snaps are appended
+    if (shadow_) {
+        if (const ShadowRecords* recs = shadow_->recordsFor(file)) {
+            std::vector<RawSnap> own;
+            for (const ShadowRecord& r : *recs) {
+                if (!r.isClear) {
+                    own.push_back({r.snap, Affine::identity()});
+                } else if (r.clearId.empty()) {
+                    out.snaps.clear();
+                } else {
+                    auto& v = out.snaps;
+                    v.erase(std::remove_if(v.begin(), v.end(), [&](const RawSnap& rs) {
+                                const auto& ids = rs.def->ids;
+                                return std::binary_search(ids.begin(), ids.end(), r.clearId);
+                            }), v.end());
+                }
+            }
+            out.snaps.insert(out.snaps.end(), own.begin(), own.end());
         }
     }
 }

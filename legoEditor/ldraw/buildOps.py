@@ -1,14 +1,42 @@
 import bpy
-from bpy.props import StringProperty
+from bpy.props import StringProperty, BoolProperty, EnumProperty
 from bpy_extras.io_utils import ImportHelper
 
 import time
 import random
 from pathlib import Path
 
-from .importer import importer, library
+from .importer import importer, library, snapReader
 from .. import utils
 from ..pointCloud import points
+
+class LEGO_OT_BuildSnaps(bpy.types.Operator):
+    bl_idname = "lego.build_snaps"
+    bl_label = "Build Snaps"
+    bl_description = "Load snapping info onto bricks from the compiled .snap files"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    scope: EnumProperty(
+            name="Bricks",
+            items=[('SELECTED', "Selected", "Selected bricks, and the bricks of selected models"),
+                   ('ALL', "All", "Every brick in the file")],
+            default='SELECTED')
+    rebuild: BoolProperty(name="Rebuild", description="Replace snaps that are already built", default=False)
+
+    def execute(self, context):
+        start = time.perf_counter()
+        searchObjs = bpy.data.objects
+        if self.scope == "SELECTED":
+            searchObjs = context.selected_objects
+        meshes = [o.data for o in bpy.data.objects if getattr(o,"is_lego",False) and o.type == "MESH"]
+        if not meshes:
+            self.report({'WARNING'}, "No bricks found")
+            return {'CANCELLED'}
+
+        snapReader.buildSnaps(meshes, self.rebuild)
+        duration = (time.perf_counter() - start) * 1000
+        self.report({'INFO'},f"Snaps built in {duration}ms")
+        return {'FINISHED'}
 
 class LEGO_OT_ImportRandom(bpy.types.Operator):
     bl_idname = "lego.import_random"
@@ -19,7 +47,6 @@ class LEGO_OT_ImportRandom(bpy.types.Operator):
         start = time.perf_counter()
         wm = bpy.context.window_manager
 
-        sf = utils.getPref("scaleFactor")
         libPath = library.getPartLibrary()
         if libPath is None:
             self.report({'WARNING'},"No piece library set!")
@@ -28,22 +55,14 @@ class LEGO_OT_ImportRandom(bpy.types.Operator):
         brickIds = library.getAllParts()       
         brickId = random.choice(brickIds)
         
-        points.importAsPoint(brickId)
-
-        return {'FINISHED'}
-        """
-        obj = importer.getBrickMesh(brickId)
-        if obj:
+        success = points.importAsPoint(brickId)
+        if success:
             duration = round(time.perf_counter() - start,4)*1000
             self.report({'INFO'},f"Brick built in {duration}ms")
-            actualObj = bpy.data.objects.new("wow",obj)
-            actualObj.is_lego = True
-            context.scene.collection.objects.link(actualObj)
             return {'FINISHED'}
         else:
             self.report({'WARNING'},"No brick found for given ID")
             return {'CANCELLED'}
-        """
 
 class LEGO_OT_ImportBrick(bpy.types.Operator):
     bl_idname = "lego.import_brick"
@@ -59,13 +78,10 @@ class LEGO_OT_ImportBrick(bpy.types.Operator):
             self.report({'WARNING'},"Please provide a brick ID")
             return {'CANCELLED'}
 
-        obj = importer.getBrickMesh(brickId)
-        if obj:
+        success = points.importAsPoint(brickId)
+        if success:
             duration = round(time.perf_counter() - start,4)*1000
             self.report({'INFO'},f"Brick built in {duration}ms")
-            actualObj = bpy.data.objects.new("wow",obj)
-            actualObj.is_lego = True
-            context.scene.collection.objects.link(actualObj)
             return {'FINISHED'}
         else:
             self.report({'WARNING'},"No brick found for given ID")
@@ -123,7 +139,7 @@ class LEGO_OT_ImportLdr(bpy.types.Operator, ImportHelper):
         importer.importMpd(self.filepath, coll)
         return {'FINISHED'}
 
-classes = (LEGO_OT_ImportBrick, LEGO_OT_ImportRandom, LEGO_OT_DebugSnaps, LEGO_OT_ImportLdr)
+classes = (LEGO_OT_ImportBrick, LEGO_OT_ImportRandom, LEGO_OT_DebugSnaps, LEGO_OT_ImportLdr, LEGO_OT_BuildSnaps)
 
 def importMenu(self, context):
     self.layout.operator(LEGO_OT_ImportLdr.bl_idname, text="LEGO LDR/MPD file (.ldr/.mpd)")

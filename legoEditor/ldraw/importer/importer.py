@@ -26,7 +26,7 @@ def unpackMpd(allModels, outDir):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("\n".join(" ".join(tokens) for tokens in lines) + "\n", encoding="utf-8")
 
-def importMpd(mpdPath, collection, scale=1.0):
+def importMpd(mpdPath, collection, scale=1.0, flatten=True):
     startTime = time.perf_counter()
     allModels = parseMpd.parseMpd(mpdPath)
     modelNames, partNames, tables = parseMpd.buildModelTables(allModels)
@@ -45,29 +45,37 @@ def importMpd(mpdPath, collection, scale=1.0):
 
         duration = time.perf_counter() - startTime
         print(f"MAKE took {duration*1000}ms")
-        # Stage 1: each model's point cloud data, built once (index = model id)
-        pcData = [points.makePointCloudData(modelNames[i], t) for i, t in enumerate(tables)]
+        
+        if flatten:
+            # import as 1 model, flatten all tables into parts only
+            flat = parseMpd.flattenTables(tables)
+            data = points.makePointCloudData(modelNames[0], flat)
+            root, modifier = points.getNewPc(modelNames[0], data, protoColl)
+            collection.objects.link(root)
+        else:
+            # Stage 1: each model's point cloud data, built once (index = model id)
+            pcData = [points.makePointCloudData(modelNames[i], t) for i, t in enumerate(tables)]
 
-        # Stage 2: one object per placement, parented down the tree
-        def place(modelId, parentObj, matrix, colour, stepOffset):
-            pcObj, modifier = points.getNewPc(modelNames[modelId], pcData[modelId], protoColl)
-            collection.objects.link(pcObj)
-            pcObj.parent = parentObj
-            pcObj.matrix_basis = Matrix(matrix.tolist())  # relative to the parent
+            # Stage 2: one object per placement, parented down the tree
+            def place(modelId, parentObj, matrix, colour, stepOffset):
+                pcObj, modifier = points.getNewPc(modelNames[modelId], pcData[modelId], protoColl)
+                collection.objects.link(pcObj)
+                pcObj.parent = parentObj
+                pcObj.matrix_basis = Matrix(matrix.tolist())  # relative to the parent
 
-            # Once the node group has these inputs:
-            # utils.setModifierInput(modifier, "InheritColour", colour)
-            # utils.setModifierInput(modifier, "StepOffset", stepOffset)
+                # Once the node group has these inputs:
+                # utils.setModifierInput(modifier, "InheritColour", colour)
+                # utils.setModifierInput(modifier, "StepOffset", stepOffset)
 
-            t = tables[modelId]
-            isModel = t["kind"]
-            for childId, m, c, s in zip(t["index"][isModel], t["matrix"][isModel],
-                                        t["colour"][isModel], t["step"][isModel]):
-                childColour = colour if c == 16 else int(c)  # 16 = take the parent's colour
-                place(int(childId), pcObj, m, childColour, stepOffset + int(s))
-            return pcObj
+                t = tables[modelId]
+                isModel = t["kind"]
+                for childId, m, c, s in zip(t["index"][isModel], t["matrix"][isModel],
+                                            t["colour"][isModel], t["step"][isModel]):
+                    childColour = colour if c == 16 else int(c)  # 16 = take the parent's colour
+                    place(int(childId), pcObj, m, childColour, stepOffset + int(s))
+                return pcObj
 
-        root = place(0, None, np.eye(4), 16, 0)
+            root = place(0, None, np.eye(4), 16, 0)
 
         # LDraw is -Y up, Blender is Z up
         root.matrix_basis = Matrix.Rotation(radians(-90), 4, 'X') @ Matrix.Scale(scale, 4)

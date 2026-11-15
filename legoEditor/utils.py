@@ -1,6 +1,11 @@
 import bpy
 
 import numpy as np
+import re
+
+dupeSuffix = re.compile(r"\.\d{3}$")  # Blender's ".001" on duplicate names
+def stripBlendSuffix(name):
+    return dupeSuffix.sub("",name)
 
 def getPref(prefName):
     preferences = bpy.context.preferences.addons[__package__].preferences

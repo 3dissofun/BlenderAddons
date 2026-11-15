@@ -29,6 +29,7 @@ public:
 
     // Folder searched before the library, so a model's own local sub-files win.
     void setLocalDir(const fs::path& dir);
+    const fs::path& localDir() const { return localDir_; }
 
     std::optional<fs::path> resolve(std::string_view relPath) const;
 

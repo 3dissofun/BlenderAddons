@@ -8,6 +8,7 @@
 #include "blob.hpp"
 #include "library.hpp"
 #include "parser.hpp"
+#include "snapfile.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -18,6 +19,7 @@
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <memory>
 #include <vector>
 
 using namespace ldc;
@@ -34,6 +36,8 @@ void usage() {
         "  --weld D        vertex weld distance in LDU (default 0.05, 0 disables)\n"
         "  --cache-mb N    memory for cached sub-files (default 1024)\n"
         "  --ldr           also write a flattened .ldr beside each blob, to check in LDView\n"
+        "  --shadow DIR    LDCad shadow library: also write <part>.snap with resolved snaps\n"
+        "  --snaps-only    only write .snap files (needs --shadow), leave .lego blobs alone\n"
         "  -q              quiet: no progress line\n";
 }
 
@@ -82,7 +86,8 @@ bool writeLDraw(const fs::path& outPath, const Geometry& geom, const std::string
 } // namespace
 
 int main(int argc, char** argv) {
-    fs::path input, libRoot, outDir;
+    fs::path input, libRoot, outDir, shadowRoot;
+    bool snapsOnly = false;
     bool recursive = false, dumpLdr = false, quiet = false;
     double weld = 0.05;
     size_t cacheMb = 1024;
@@ -99,6 +104,8 @@ int main(int argc, char** argv) {
         else if (a == "--weld") weld = std::atof(next());
         else if (a == "--cache-mb") cacheMb = static_cast<size_t>(std::atoll(next()));
         else if (a == "--ldr") dumpLdr = true;
+        else if (a == "--shadow") shadowRoot = next();
+        else if (a == "--snaps-only") snapsOnly = true;
         else if (a == "-q") quiet = true;
         else if (a == "-h" || a == "--help") { usage(); return 0; }
         else if (!a.empty() && a[0] == '-') { std::cerr << "unknown option " << a << "\n"; usage(); return 1; }
@@ -106,6 +113,7 @@ int main(int argc, char** argv) {
         else { std::cerr << "unexpected argument " << a << "\n"; usage(); return 1; }
     }
     if (input.empty()) { usage(); return 1; }
+    if (snapsOnly && shadowRoot.empty()) { std::cerr << "--snaps-only needs --shadow DIR\n"; return 1; }
 
     std::error_code ec;
     input = fs::absolute(input, ec).lexically_normal();
@@ -152,10 +160,22 @@ int main(int argc, char** argv) {
     lib.setLocalDir(inDir);
     const auto t1 = std::chrono::steady_clock::now();
 
-    std::cerr << "library " << lib.root().string() << " (" << lib.size() << " files)\n"
-              << "writing " << files.size() << " blobs to " << outDir.string() << "\n";
+    std::unique_ptr<ShadowLibrary> shadow;
+    if (!shadowRoot.empty()) {
+        shadow = std::make_unique<ShadowLibrary>(shadowRoot, lib);
+        if (!shadow->valid()) {
+            std::cerr << "no shadow library (p/ or parts/, optionally under offLib/) at " << shadowRoot << "\n";
+            return 1;
+        }
+    }
 
-    Flattener flat(lib, cacheMb * 1024 * 1024);
+    std::cerr << "library " << lib.root().string() << " (" << lib.size() << " files)\n";
+    if (shadow) std::cerr << "shadow library " << shadow->root().string() << " (" << shadow->size() << " files)\n";
+    std::cerr << "writing " << files.size() << (snapsOnly ? " snap files" : shadow ? " blobs + snap files" : " blobs")
+              << " to " << outDir.string() << "\n";
+
+    Flattener flat(lib, cacheMb * 1024 * 1024, shadow.get(), !snapsOnly);
+    size_t snapFiles = 0, totalSnaps = 0;
     size_t failed = 0, empty = 0, totalFaces = 0, totalDropped = 0;
     size_t edgeLines = 0, edgesDirect = 0, edgesWalked = 0, edgesUnmatched = 0, sharpEdges = 0, quadsSplit = 0;
 
@@ -168,6 +188,28 @@ int main(int argc, char** argv) {
         const fs::path out = outDir / fs::path(rel);
 
         const auto geom = flat.flatten(file);
+
+        if (shadow) {
+            fs::path snapOut = out;
+            snapOut.replace_extension(".snap");
+            const std::vector<Snap> snaps = resolveSnaps(geom->snaps);
+            if (snaps.empty()) {
+                fs::remove(snapOut, ec); // stale file from an earlier shadow library
+            } else if (!writeSnapFile(snapOut, snaps)) {
+                std::cerr << "\nERROR, could not write " << snapOut << "\n";
+                ++failed;
+            } else {
+                ++snapFiles;
+                totalSnaps += snaps.size();
+            }
+        }
+        if (snapsOnly) {
+            if (!quiet && (i % 200 == 0 || i + 1 == files.size()))
+                std::cerr << "\r[" << (i + 1) << "/" << files.size() << "] " << file.filename().string()
+                          << "                    " << std::flush;
+            continue;
+        }
+
         BlobStats bs;
         if (!writeBlob(out, *geom, flat.textures(), weld, &bs)) {
             std::cerr << "\nERROR, could not write " << out << "\n";
@@ -200,7 +242,7 @@ int main(int argc, char** argv) {
     auto sec = [](auto a, auto b) { return std::chrono::duration<double>(b - a).count(); };
     const auto& st = flat.stats();
     std::cerr << "done in " << sec(t0, t2) << " s (indexing " << sec(t0, t1) << " s)\n"
-              << "  " << (files.size() - failed) << " blobs written, " << failed << " failed, "
+              << "  " << (snapsOnly ? 0 : files.size() - failed) << " blobs written, " << failed << " failed, "
               << empty << " with no geometry\n"
               << "  " << totalFaces << " faces, " << totalDropped << " degenerate faces dropped by welding\n"
               << "  " << edgeLines << " edge lines: " << edgesDirect << " matched directly, " << edgesWalked
@@ -210,5 +252,18 @@ int main(int argc, char** argv) {
               << st.cacheEvictions << " evictions\n"
               << "  " << st.missingRefs << " missing refs, " << st.missingTextures << " missing textures, "
               << st.badLines << " bad lines\n";
+    if (shadow && !failed) {
+        // Marks this blobs folder as having snaps built: a blob without a .snap then
+        // means "no snaps", not "snaps never compiled"
+        std::ofstream info(outDir / "snaps.info", std::ios::binary);
+        info << "shadow " << shadow->root().generic_string() << "\nversion " << SNAPFILE_VERSION
+             << "\nparts " << snapFiles << "\nsnaps " << totalSnaps << "\n";
+    }
+    if (shadow) {
+        const auto& ss = shadow->stats();
+        std::cerr << "  " << snapFiles << " snap files, " << totalSnaps << " snaps; " << ss.filesRead
+                  << " shadow files read, " << ss.missingIncludes << " missing SNAP_INCL refs, " << ss.badSnaps
+                  << " invalid snap metas\n";
+    }
     return failed ? 2 : 0;
 }

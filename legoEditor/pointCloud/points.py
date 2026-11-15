@@ -123,6 +123,7 @@ def getNewProtoColl(protoCollName):
     protoColl.hide_viewport = True
     protoColl.hide_render = True
     bpy.context.scene.collection.children.link(protoColl)
+    return protoColl
 
 def importAsPoint(brickId, model="misc"):
     # method to create or extend the current models point cloud
@@ -130,6 +131,8 @@ def importAsPoint(brickId, model="misc"):
         brickId = brickId + ".dat"
 
     brickMesh = importer.getBrickMesh(brickId)
+    if not brickMesh:
+        return False
 
     # get a collection for prototypes for this model, if it doesnt exist, make it
     protoCollName = model + "_Prototypes"
@@ -137,7 +140,7 @@ def importAsPoint(brickId, model="misc"):
     if existing:
         protoColl = existing
     else:
-        protoColl = getProtoColl(protoCollName)
+        protoColl = getNewProtoColl(protoCollName)
 
     # get the point cloud
     currentPc = bpy.data.objects.get(model,None)
@@ -181,6 +184,7 @@ def importAsPoint(brickId, model="misc"):
     if typeAttr is None:
         typeAttr = pc.attributes.new("type","INT","POINT")
     typeAttr.data[currentAmount].value = nextFreeType
+    return True
 
 def makePointCloudData(name,modelTable):
     # function to take in a name and a modelTable dict, this works as a core function of importMpd

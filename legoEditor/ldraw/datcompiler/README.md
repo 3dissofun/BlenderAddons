@@ -29,6 +29,8 @@ found by searching upward for a folder containing `p/` and `parts/`.
 | `--weld D` | weld distance in LDU, default 0.05 (same as brickMaker), 0 = off |
 | `--cache-mb N` | memory for cached sub-files, default 1024 |
 | `--ldr` | also write a flattened `.ldr` beside each blob, to inspect in LDView |
+| `--shadow DIR` | LDCad shadow library: also write `<part>.snap` with the part's resolved snaps |
+| `--snaps-only` | with `--shadow`: only (re)write `.snap` files, leave `.lego` blobs alone |
 | `-q` | no progress line |
 
 A single `.dat` file also works as the input.
@@ -46,7 +48,16 @@ A single `.dat` file also works as the input.
 - `!TEXMAP` PLANAR / CYLINDRICAL / SPHERICAL, including NEXT, FALLBACK, `0 !:` and GLOSSMAP:
   per-face texture index and per-loop UVs (v already flipped for Blender)
 
-Not yet: snaps (shadow library).
+## Snaps
+
+With `--shadow`, each part that has snaps gets a `.snap` file beside its blob: the
+fully resolved list (includes, grids, scale/mirror rules, SNAP_CLEAR, dedupe), exactly
+what `parsePart(...)["connectors"]` gives `brickMaker.storeSnaps`. Format: `src/snapfile.hpp`.
+`blobs/snaps.info` marks the folder as snap-compiled.
+
+Blender side: `blender/snapReader.py` (into `legoEditor/ldraw/importer/`) and the
+`Build Snaps` operator in `blender/buildSnapsOperator.py` (paste into `buildOps.py`).
+Parts with no blob (custom / MPD-embedded) fall back to the Python parser.
 
 ## Format
 
