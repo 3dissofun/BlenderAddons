@@ -1,7 +1,11 @@
-from . import select
+from . import select, move, rotate
+
+modules = [select,move,rotate]
 
 def register():
-    select.register()
+    for m in modules:
+        m.register()
 
 def unregister():
-    select.unregister()
+    for m in reversed(modules):
+        m.unregister()

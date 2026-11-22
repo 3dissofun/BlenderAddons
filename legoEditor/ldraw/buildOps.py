@@ -131,12 +131,18 @@ class LEGO_OT_ImportLdr(bpy.types.Operator, ImportHelper):
 
     filename_ext = ".ldr"
     filter_glob: StringProperty(default="*.ldr;*.mpd", options={'HIDDEN'})
+    flattened: BoolProperty(default=True,description="Flatten the the imported model into one object. can help with viewport performance/build previews")
+
+    def draw(self,context):
+        layout = self.layout
+        layout.prop(self,"flattened")
 
     def execute(self, context):
         name = Path(self.filepath).stem
         coll = bpy.data.collections.new(name)
         context.scene.collection.children.link(coll)
-        importer.importMpd(self.filepath, coll)
+        sf = utils.getPref("scaleFactor")
+        importer.importMpd(self.filepath, coll, scale=sf,flatten=self.flattened)
         return {'FINISHED'}
 
 classes = (LEGO_OT_ImportBrick, LEGO_OT_ImportRandom, LEGO_OT_DebugSnaps, LEGO_OT_ImportLdr, LEGO_OT_BuildSnaps)

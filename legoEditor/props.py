@@ -1,5 +1,5 @@
 import bpy
-from bpy.props import StringProperty, FloatProperty, BoolProperty
+from bpy.props import StringProperty, FloatProperty, BoolProperty, EnumProperty
 from .ldraw.importer import library
 
 def onLibChange(self,context):
@@ -8,6 +8,14 @@ def onLibChange(self,context):
 
 def onShadowLibChange(self,context):
     library.clearCaches()
+
+# Snapping modes for moving bricks in a lego point cloud. Shared by the scene setting
+# and the move operator. (identifier, name, description, icon, number)
+snapItems = [
+    ('GRID', "Grid", "Snap to an LDU grid of Grid Size", 'SNAP_GRID', 0),
+    ('BRICK', "Brick", "Snap to other bricks studs, or the grid id none fit", 'MESH_CUBE', 1),
+    ('NONE', "None", "No snapping", 'SNAP_OFF', 2),
+]
 
 class LE_AddonPreferences(bpy.types.AddonPreferences):
     bl_idname = __package__
@@ -28,7 +36,20 @@ def register():
             description="Marks this point cloud as a Lego model",
             default=False,
             )
+    bpy.types.Scene.lego_snap_mode = EnumProperty(
+            name="Lego Snapping",
+            description="How bricks snap when moved in a lego point cloud",
+            items=snapItems,
+            default='BRICK',
+            )
+    bpy.types.Scene.lego_grid_size = FloatProperty(
+            name="Grid Size",
+            description="Snap step in LDU, for Grid snapping and for Brick snapping when no brick is close",
+            default=1.0, min=0.001, soft_max=40.0,
+            )
     bpy.utils.register_class(LE_AddonPreferences)
 
 def unregister():
     bpy.utils.unregister_class(LE_AddonPreferences)
+    del bpy.types.Scene.lego_grid_size
+    del bpy.types.Scene.lego_snap_mode

@@ -318,7 +318,8 @@ std::optional<Snap> buildSnap(SnapKind kind, const Params& p, const Affine& loca
         return s;
     }
     case SNAP_GEN: {
-        for (auto tok : split(getOr(p, "bounding", "pnt"))) s.bounding.emplace_back(tok);
+        const std::string bounding = getOr(p, "bounding", "pnt"); // must outlive the views split() returns
+        for (auto tok : split(bounding)) s.bounding.emplace_back(tok);
         s.radius = boundingRadius(s.bounding);
         return s;
     }

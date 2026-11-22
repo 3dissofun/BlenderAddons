@@ -1,0 +1,51 @@
+THE PLAN
+
+DEFINITIONS
+
+	Datablock   A Blender ID in the working file (mesh, material, image, object...).
+		    Identified by a UUID stored as an ID property on first track.
+
+	Blob        An opaque stored snapshot of one datablock (e.g. a libraries.write
+		    fragment). Stored under its hash; never compared directly.
+
+	Hash        Deterministic fingerprint of a datablock: its tracked properties
+		    (per-type list) + the UUIDs it references, in order. Excludes name,
+		    selection/UI state, and referenced blocks' contents.
+
+	Pointer     A reference from one datablock to another, recorded by target UUID
+		    (e.g. modifier target object, material slot). Changes the referencing
+		    block's hash only when the assignment changes. Untracked targets are
+		    auto-tracked.
+
+	Asset       A set of tracked datablocks versioned together.
+
+	Manifest    Snapshot of an asset: schema version, asset ID, asset label, and per
+		    UUID: type, name, hash, blob key, pointers. Canonically serialised
+		    and hashed.
+
+	Commit      Manifest hash + parent commit(s) + author + message + timestamp.
+		    Local until pushed.
+
+	Ref         Named pointer to a commit (e.g. main) on the remote. Updated only by
+		    compare-and-swap.
+
+	Lock        Remote lease on an asset or datablock: user, acquired, expires.
+		    Renewed while held; lapses if not renewed. Push rejects changes to
+		    blocks locked by someone else. Admins can force-release.
+
+	Diff        Manifest vs manifest, per UUID: added / removed / modified (hash) /
+		    renamed / pointers changed.
+		      local:    working file vs last commit
+		      incoming: last commit vs remote ref
+
+	Push        Upload missing blobs -> manifest -> commit, then CAS the remote ref.
+		    Rejected if the ref moved; user must pull first.
+
+	Pull        Fetch remote commits, merge into local, then apply to the file:
+		    append new/changed blocks, remap pointers, remove deleted blocks.
+
+	Conflict    Same UUID changed on both sides since the common ancestor, to
+		    different hashes (incl. modify vs delete).
+
+	Resolution  Per conflicting datablock: mine / theirs / both (theirs imported
+		    as "Name [theirs]"). Produces a merge commit with two parents.

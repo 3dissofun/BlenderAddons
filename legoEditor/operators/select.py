@@ -8,14 +8,8 @@ from bpy.props import BoolProperty, IntVectorProperty
 from mathutils.kdtree import KDTree
 from mathutils import Quaternion
 
+from . import common
 from .. import utils
-
-def isLegoPointCloud(obj):
-    if obj is None:
-        return False
-    if obj.type == "POINTCLOUD" and getattr(obj,"is_lego_model",False):
-        return True
-    return False
 
 def buildTree(pointCloud):
     # returns a KD tree for a point cloud input
@@ -88,7 +82,7 @@ def pickPoint(context, mousePos):
     hitType = getHitType(obj)
 
     for pcObj in context.objects_in_mode:
-        if not isLegoPointCloud(pcObj) or len(pcObj.data.points) == 0:
+        if not common.isLegoPointCloud(pcObj) or len(pcObj.data.points) == 0:
             continue
         pc = pcObj.data
 

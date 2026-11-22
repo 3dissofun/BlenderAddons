@@ -8,19 +8,17 @@ bl_info = {
     "category": "Modelling",
 }
 
-from . import ldraw, ldd, props, operators, assetShelf, ui
+from . import ldraw, ldd, props, operators, ui
 
 def register():
     props.register()
     ldraw.register()
     ldd.register()
     operators.register()
-    assetShelf.register()
     ui.register()
 
 def unregister():
     ui.unregister()
-    unassetShelf.register()
     ldd.unregister()
     ldraw.unregister()
     operators.unregister()
