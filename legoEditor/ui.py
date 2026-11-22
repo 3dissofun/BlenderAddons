@@ -12,6 +12,9 @@ class LEGO_PT_LegoPanel(bpy.types.Panel):
         layout = self.layout
         layout.operator("lego.import_random")
         layout.operator("lego.build_snaps")
+        obj = context.active_object
+        if obj and obj.is_lego_model:
+            layout.prop(obj,"lego_quality",expand=True)
 
 classes = (LEGO_PT_LegoPanel,)
 

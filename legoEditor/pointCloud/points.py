@@ -90,6 +90,10 @@ def makeInstancerGroup():
 
     return nodeGroup
 
+def makeQualityGroup():
+    nodeGroup = bpy.data.node_groups.new('LegoQuality_GN', 'GeometryNodeTree')
+    return nodeGroup
+
 def getInstancingGroup():
     # function to return the LegoInstancer_GN nodegroup from the blend file if it exists
     # otherwise it makes the nodegroup from scratch
@@ -98,6 +102,38 @@ def getInstancingGroup():
         return existing
     existing = makeInstancerGroup()
     return existing
+
+def getQualityGroup():
+    # function to return the LegoQuality_GN nodegroup from the blend file if it exists
+    # otherwise it makes it from scratch
+    existing = bpy.data.node_groups.get("LegoQuality_GN",None)
+    if existing:
+        return existing
+    existing = makeQualityGroup()
+    return existing
+
+def updatePcQuality(pc,quality):
+    # function to update the quality of lego prototypes on a lego model point cloud
+    # returns true on success and false on failure
+    # quality is the enum quality string defined in props.py
+    protoColl = pc.lego_prototypes
+    if not protoColl:
+        return False
+
+    #pc.lego_quality = quality
+    high = False
+    if quality == "HIGH":
+        high = True
+    
+    for o in protoColl.all_objects:
+        o.lego_quality = quality
+        if high:
+            ng = getQualityGroup()
+            mod = o.modifiers.new(name="LegoQuality",type='NODES')
+            mod.node_group = ng
+        else:
+            o.modifiers.clear()
+    return True
 
 def getNewPc(name,pc=None,protoColl=None):
     # function to return a new point cloud object with relevant attributes set etc
@@ -114,6 +150,7 @@ def getNewPc(name,pc=None,protoColl=None):
     nodeGroup = getInstancingGroup()
     modifier.node_group = nodeGroup
     if protoColl is not None:
+        pcObj.lego_prototypes = protoColl 
         utils.setModifierInput(modifier, "Collection", protoColl)
 
     return pcObj, modifier

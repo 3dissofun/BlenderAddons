@@ -1,9 +1,10 @@
 import bpy
-from bpy.props import StringProperty, FloatProperty, BoolProperty, EnumProperty
+from bpy.props import StringProperty, FloatProperty, BoolProperty, EnumProperty, PointerProperty
 
 import math
 
 from .ldraw.importer import library
+from .pointCloud.points import updatePcQuality
 
 def onLibChange(self,context):
     library.clearPartIndex()
@@ -11,6 +12,10 @@ def onLibChange(self,context):
 
 def onShadowLibChange(self,context):
     library.clearCaches()
+
+def onQualityChange(self,context):
+    if self.is_lego_model:
+        updatePcQuality(self,self.lego_quality)
 
 # Snapping modes for moving bricks in a lego point cloud. Shared by the scene setting
 # and the move operator. (identifier, name, description, icon, number)
@@ -56,9 +61,24 @@ def register():
             subtype='ANGLE',
             default=math.radians(90.0), min=math.radians(0.1), max=math.radians(180.0),
             )
+    bpy.types.Object.lego_prototypes = PointerProperty(
+            name="Prototypes",
+            description="Collection holding this model's brick prototypes",
+            type=bpy.types.Collection,
+            )
+    bpy.types.Object.lego_quality = EnumProperty(
+            name="Quality",
+            description="Brick detail, set with modifiers on the model's prototypes",
+            items=[('LOW',"Low","No extra work on the bricks"),('HIGH',"High","Geometry bevels on the bricks")],
+            default='LOW',
+            update=onQualityChange,
+            )
     bpy.utils.register_class(LE_AddonPreferences)
 
 def unregister():
     bpy.utils.unregister_class(LE_AddonPreferences)
     del bpy.types.Scene.lego_grid_size
     del bpy.types.Scene.lego_snap_mode
+    del bpy.types.Scene.lego_rotate_step 
+    del bpy.types.Object.lego_quality
+    del bpy.types.Object.lego_prototypes
