@@ -1,0 +1,15 @@
+# This is an Asset Catalog Definition file for Blender.
+# Written by the Lego Editor colour shelf, rebuilt every time.
+
+VERSION 1
+
+460fbe9c-0475-5258-a06f-6c0001c59aa2:Solid:Solid
+ce50db78-9a0a-567a-821b-1dc075d66fd4:Transparent:Transparent
+b3830de7-9a81-59f5-a7aa-ea53e98588ff:Chrome:Chrome
+188ebd9b-0761-5cc6-a430-2e1782e4a83f:Metallic:Metallic
+70ad6988-4df2-57e5-b484-be21cc3fa40a:Pearlescent:Pearlescent
+fa0cf18b-3a55-5f7c-af09-db2c44605158:Rubber:Rubber
+c66dd3c3-47a2-5f16-8436-3df2d4cde77a:Glitter:Glitter
+91f835ad-5b3e-5ea6-9d9e-a063c218d719:Speckle:Speckle
+a569ba22-48f1-5631-9ba1-39723a6d7be6:Fabric:Fabric
+50657e78-28ab-5153-b632-d25343755ee8:Glow:Glow

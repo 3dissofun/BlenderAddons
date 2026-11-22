@@ -67,8 +67,12 @@ class LEGO_OT_SetColour(bpy.types.Operator):
 
 # Registration \/
 
+keymaps = common.Keymaps()
+
 def register():
     bpy.utils.register_class(LEGO_OT_SetColour)
+    keymaps.add(LEGO_OT_SetColour.bl_idname, 'F', 'PRESS')
 
 def unregister():
+    keymaps.clear()
     bpy.utils.unregister_class(LEGO_OT_SetColour)
