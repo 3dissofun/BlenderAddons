@@ -8,20 +8,14 @@ bl_info = {
     "category": "Modelling",
 }
 
-from . import ldraw, ldd, props, operators, ui, colourShelf
+from . import ldraw, ldd, props, operators, ui, colourShelf, pointCloud
+
+modules = [ldraw,ldd,props,operators,ui,colourShelf,pointCloud]
 
 def register():
-    props.register()
-    ldraw.register()
-    ldd.register()
-    colourShelf.register()
-    operators.register()
-    ui.register()
+    for m in modules:
+        m.register()
 
 def unregister():
-    ui.unregister()
-    colourShelf.unregister()
-    ldd.unregister()
-    ldraw.unregister()
-    operators.unregister()
-    props.unregister()
+    for m in reversed(modules):
+        m.unregister()
