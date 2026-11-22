@@ -1,6 +1,6 @@
-from . import select, move, rotate
+from . import select, move, rotate, color
 
-modules = [select,move,rotate]
+modules = [select,move,rotate,color]
 
 def register():
     for m in modules:

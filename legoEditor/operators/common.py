@@ -133,9 +133,9 @@ class CloudMove:
         self.tilted = False  # rotations currently differ from origRot
 
     def worldPoints(self):
-        # world space positions of the selected points, as drawn by the instancer
-        mat = self.obj.matrix_world
-        return [mat @ Vector(p) for p in self.orig[self.mask]]
+        # (k, 3) world space positions of the selected points, as drawn by the instancer
+        M = self.matrix
+        return self.orig[self.mask].astype(np.float64) @ M[:3, :3].T + M[:3, 3]
 
     def lduDelta(self, worldDelta, step=None, absolute=False):
         delta = np.array(self.worldToLdu @ worldDelta, dtype=np.float64)
@@ -186,8 +186,8 @@ def gatherClouds(context):
 
 def selectionCentre(clouds):
     # world space middle of every selected brick
-    points = [p for c in clouds for p in c.worldPoints()]
-    return sum(points, Vector()) / len(points)
+    points = np.concatenate([c.worldPoints() for c in clouds])
+    return Vector(points.mean(axis=0))
 
 # Modal helpers \/
 

@@ -1,5 +1,5 @@
 import bpy
-from bpy.props import StringProperty, FloatProperty, BoolProperty, EnumProperty, PointerProperty
+from bpy.props import StringProperty, FloatProperty, BoolProperty, EnumProperty, PointerProperty, IntProperty
 
 import math
 
@@ -53,13 +53,18 @@ def register():
     bpy.types.Scene.lego_grid_size = FloatProperty(
             name="Grid Size",
             description="Snap step in LDU, for Grid snapping and for Brick snapping when no brick is close",
-            default=1.0, min=0.001, soft_max=40.0,
+            default=8.0, min=0.001, soft_max=40.0,
             )
     bpy.types.Scene.lego_rotate_step = FloatProperty(
             name="Rotate Step",
             description="Angle step when rotating bricks with snapping on",
             subtype='ANGLE',
             default=math.radians(90.0), min=math.radians(0.1), max=math.radians(180.0),
+            )
+    bpy.types.Scene.lego_active_col = IntProperty(
+            name="Active Color",
+            description="Active ldraw lego color code of the scene",
+            default=1,
             )
     bpy.types.Object.lego_prototypes = PointerProperty(
             name="Prototypes",
@@ -80,5 +85,6 @@ def unregister():
     del bpy.types.Scene.lego_grid_size
     del bpy.types.Scene.lego_snap_mode
     del bpy.types.Scene.lego_rotate_step 
+    del bpy.types.Scene.lego_active_col
     del bpy.types.Object.lego_quality
     del bpy.types.Object.lego_prototypes

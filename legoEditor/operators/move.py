@@ -31,7 +31,7 @@ from mathutils.geometry import intersect_line_line, intersect_line_plane
 
 from .. import utils
 from ..ldraw.importer import snapReader
-from . import common, snapmatch
+from . import common,snapmatch
 
 # Snapping \/
 
@@ -68,24 +68,32 @@ def getPrototypes(obj):
     return {t: p for t, p in protos.items() if len(p[0].lego_snaps) > 0}
 
 def snapInstances(obj, indices, protos, positions, quats, types):
-    # (point index, brick mesh, brick world matrix) for the given points whose type has snaps
-    indices = [int(i) for i in indices if int(types[i]) in protos]
-    if not indices:
+    # [(brick mesh, (k, 4, 4) world matrices)] for the given points whose type has snaps,
+    # one entry per brick type
+    indices = np.asarray(indices, dtype=np.int64)
+    if len(indices) == 0:
         return []
     worlds = common.instanceWorlds(np.array(obj.matrix_world, dtype=np.float64),
-                            positions[indices], quats[indices])
+                                   positions[indices], quats[indices])
+    pointTypes = types[indices]
     out = []
-    for i, world in zip(indices, worlds):
-        mesh, protoMatrix = protos[int(types[i])]
-        out.append((i, mesh, world @ protoMatrix))
+    for t in np.unique(pointTypes):
+        proto = protos.get(int(t))
+        if proto is not None:
+            mesh, protoMatrix = proto
+            out.append((mesh, worlds[pointTypes == t] @ protoMatrix))
     return out
 
 
 class PointSnapper(snapmatch.Snapper):
     """snapmatch.Snapper fed with instanced bricks rather than objects.
 
-    moving: [(key, mesh, world matrix)], static: [(mesh, world matrix)], numpy 4x4 matrices.
-    find(context, base, delta) works as before, with base = {key: world matrix}.
+    moving, static: [(mesh, (k, 4, 4) world matrices)], numpy.
+
+    A move only translates the bricks, so the moving joints' directions and classes are
+    worked out once here, with all moving bricks merged into one set of joints. find() then
+    only projects them and searches near the static ones; Snapper.find redid all of that for
+    every moving brick on every mouse move.
     """
     def __init__(self, moving, static):
         self._groups = {"": 0}
@@ -96,64 +104,136 @@ class PointSnapper(snapmatch.Snapper):
         self._fits = {}
         self._compat = {}
 
-        self.tol = snapmatch.RADIUS_TOL * (snapmatch._scale(moving[0][2]) if moving else 1.0)
+        self.tol = snapmatch.RADIUS_TOL * (snapmatch._scale(moving[0][1][0]) if moving else 1.0)
 
-        self.moving = []
-        for key, mesh, matrix in moving:
-            local = self._local(mesh)
-            self.moving.append((key, local, self._profileIds(mesh, local, snapmatch._scale(matrix))))
-
-        pos, axis, kind, male, group, radius, prof = [], [], [], [], [], [], []
-        for mesh, matrix in static:
-            local = self._local(mesh)
-            sc = snapmatch._scale(matrix)
-            p, a = local.world(matrix)
-            pos.append(p)
-            axis.append(a)
-            kind.append(local.kind)
-            male.append(local.male)
-            group.append(local.group)
-            radius.append(local.radius * sc)
-            prof.append(self._profileIds(mesh, local, sc))
-
-        self.active = bool(self.moving and pos and any(len(l.pos) for _, l, _ in self.moving))
+        mv = self._joints(moving)
+        st = self._joints(static)
+        self.active = mv is not None and st is not None
         if not self.active:
             return
-        self.pos = np.concatenate(pos)
-        self.axis = np.concatenate(axis)
-        self.active = len(self.pos) > 0
-        keys = snapmatch._classKeys(np.concatenate(kind), np.concatenate(male), np.concatenate(group),
-                                    np.concatenate(prof), np.concatenate(radius), self.axis)
-        self.classKeys, self.members = snapmatch._classes(keys)
+
+        self.movePos, self.moveAxis, self.moveLdu = mv["pos"], mv["axis"], mv["ldu"]
+        self.moveKeys, self.moveMembers = snapmatch._classes(snapmatch._classKeys(
+            mv["kind"], mv["male"], mv["group"], mv["prof"], mv["radius"], mv["axis"]))
+
+        self.pos, self.axis = st["pos"], st["axis"]
+        self.classKeys, self.members = snapmatch._classes(snapmatch._classKeys(
+            st["kind"], st["male"], st["group"], st["prof"], st["radius"], st["axis"]))
+
+    def _joints(self, items):
+        # every snap joint of many bricks at once, as concatenated arrays (or None if none).
+        # Bricks of one part at one scale share their local joints, so they're done together
+        fields = ("pos", "axis", "kind", "male", "group", "radius", "prof", "ldu")
+        out = {f: [] for f in fields}
+        for mesh, mats in items:
+            local = self._local(mesh)
+            n = len(local.pos)
+            if n == 0 or len(mats) == 0:
+                continue
+            scales = np.linalg.norm(mats[:, :3, 0], axis=1)  # world size of one LDU, per brick
+            rounded = np.round(scales, 6)
+            for sc in np.unique(rounded):
+                M = mats[rounded == sc]
+                k = len(M)
+                R, t = M[:, :3, :3], M[:, :3, 3]
+                pos = np.einsum('kij,nj->kni', R, local.pos) + t[:, None, :]
+                axis = np.einsum('kij,nj->kni', R, local.axis)
+                axis /= np.maximum(np.linalg.norm(axis, axis=2, keepdims=True), 1e-12)
+                out["pos"].append(pos.reshape(-1, 3))
+                out["axis"].append(axis.reshape(-1, 3))
+                out["kind"].append(np.tile(local.kind, k))
+                out["male"].append(np.tile(local.male, k))
+                out["group"].append(np.tile(local.group, k))
+                out["radius"].append(np.tile(local.radius * sc, k))
+                out["prof"].append(np.tile(self._profileIds(mesh, local, float(sc)), k))
+                out["ldu"].append(np.full(k * n, sc))
+        if not out["pos"]:
+            return None
+        return {f: np.concatenate(v) for f, v in out.items()}
+
+    def find(self, context, delta, maxPx=None):
+        """World transform that snaps this move, or None if nothing is close enough.
+
+        delta: the free (unsnapped) translation, a mathutils Vector. Returns a Matrix to
+        left-multiply onto each moving brick's world matrix, as Snapper.find does.
+        """
+        if not self.active:
+            return None
+        if maxPx is None:
+            maxPx = snapmatch.SNAP_PX * context.preferences.system.ui_scale
+        region = context.region
+        lo = np.array([-maxPx, -maxPx])
+        hi = np.array([region.width + maxPx, region.height + maxPx])
+
+        def onScreen(px, front):
+            return front & np.all((px > lo) & (px < hi), axis=1)
+
+        # every moving joint projected once, at where the free move puts it
+        freePx, freeFront = snapmatch._project(context, self.movePos + np.array(delta, dtype=np.float64))
+        visible = onScreen(freePx, freeFront)
+
+        targets = {}  # (static class, offset) -> (positions, axes, px), this update
+        cand = []     # (pixel distance, depth, target, pivot, moving axis, static axis, LDU size)
+        for ka, ia in zip(self.moveKeys, self.moveMembers):
+            ia = ia[visible[ia]]
+            if len(ia) == 0:
+                continue
+            for b, off in self._compatible(ka):
+                t = targets.get((b, off))
+                if t is None:
+                    jb = self.members[b]
+                    tPos = self.pos[jb] + off * self.axis[jb]
+                    tPx, tFront = snapmatch._project(context, tPos)
+                    keep = onScreen(tPx, tFront)
+                    t = targets[(b, off)] = (tPos[keep], self.axis[jb][keep], tPx[keep])
+                tPos, tAxis, tPx = t
+                i, j, dist = snapmatch._nearPairs(freePx[ia], tPx, maxPx)
+                if len(i) == 0:
+                    continue
+                snapped = tPos[j]
+                m = ia[i]
+                cand.append((dist, snapmatch._viewDepth(context, snapped), snapped,
+                             self.movePos[m], self.moveAxis[m], tAxis[j], self.moveLdu[m]))
+
+        if not cand:
+            return None
+        px, depth, target, pivot, mAxis, sAxis, ldu = (np.concatenate(c) for c in zip(*cand))
+
+        # same score as Snapper.find
+        tilt = np.arccos(np.clip((mAxis * sAxis).sum(axis=1), -1.0, 1.0))
+        extra = (depth - depth.min()) / np.maximum(ldu * snapmatch.DEPTH_RANGE, 1e-12)
+        score = (px / maxPx
+                 + snapmatch.DEPTH_WEIGHT * np.minimum(extra, 1.0)
+                 + snapmatch.ALIGN_WEIGHT * tilt / snapmatch.ALIGN_ANGLE)
+        k = int(np.argmin(score))
+        return snapmatch._snapMatrix(pivot[k], mAxis[k], target[k], sAxis[k])
 
 
 def buildSnapper(context, clouds):
     # The moving bricks are the selected points; everything else visible with snaps is static:
     # unselected points, other lego clouds and ordinary lego brick objects
-    moving, base, static = [], {}, []
+    moving, static = [], []
     movingObjs = {c.obj for c in clouds}
 
-    for ci, cloud in enumerate(clouds):
+    for cloud in clouds:
         protos = getPrototypes(cloud.obj)
         types = common.readTypes(cloud.pc)
         args = (protos, cloud.orig, cloud.origRot, types)
-        for i, mesh, world in snapInstances(cloud.obj, np.flatnonzero(cloud.mask), *args):
-            moving.append(((ci, i), mesh, world))
-            base[(ci, i)] = world
-        static += [(m, w) for _, m, w in snapInstances(cloud.obj, np.flatnonzero(~cloud.mask), *args)]
+        moving += snapInstances(cloud.obj, np.flatnonzero(cloud.mask), *args)
+        static += snapInstances(cloud.obj, np.flatnonzero(~cloud.mask), *args)
 
     for obj in context.visible_objects:
         if obj in movingObjs:
             continue
         if common.isLegoPointCloud(obj) and len(obj.data.points) > 0:
             pc = obj.data
-            static += [(m, w) for _, m, w in snapInstances(
-                obj, range(len(pc.points)), getPrototypes(obj),
-                common.readPositions(pc), common.readRotations(pc), common.readTypes(pc))]
+            static += snapInstances(obj, np.arange(len(pc.points)), getPrototypes(obj),
+                                    common.readPositions(pc), common.readRotations(pc),
+                                    common.readTypes(pc))
         elif snapmatch.hasSnaps(obj):
-            static.append((obj.data, np.array(obj.matrix_world, dtype=np.float64)))
+            static.append((obj.data, np.array(obj.matrix_world, dtype=np.float64)[None]))
 
-    return PointSnapper(moving, static), base
+    return PointSnapper(moving, static)
 
 # Operator itself \/
 
@@ -268,9 +348,9 @@ class LEGO_OT_MoveInstance(bpy.types.Operator):
 
         snap = None
         if mode == 'BRICK':
-            snapper, base = self.getSnapper(context)
+            snapper = self.getSnapper(context)
             if snapper.active:
-                snap = snapper.find(context, base, delta)
+                snap = snapper.find(context, delta)
         self.snapped = snap is not None
         self.use_grid = snap is None and mode != 'NONE'
         if snap is not None:
