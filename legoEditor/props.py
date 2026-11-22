@@ -1,5 +1,8 @@
 import bpy
 from bpy.props import StringProperty, FloatProperty, BoolProperty, EnumProperty
+
+import math
+
 from .ldraw.importer import library
 
 def onLibChange(self,context):
@@ -46,6 +49,12 @@ def register():
             name="Grid Size",
             description="Snap step in LDU, for Grid snapping and for Brick snapping when no brick is close",
             default=1.0, min=0.001, soft_max=40.0,
+            )
+    bpy.types.Scene.lego_rotate_step = FloatProperty(
+            name="Rotate Step",
+            description="Angle step when rotating bricks with snapping on",
+            subtype='ANGLE',
+            default=math.radians(90.0), min=math.radians(0.1), max=math.radians(180.0),
             )
     bpy.utils.register_class(LE_AddonPreferences)
 

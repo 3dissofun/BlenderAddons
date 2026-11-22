@@ -8,19 +8,16 @@ from bpy.props import BoolProperty, IntVectorProperty
 from mathutils.kdtree import KDTree
 from mathutils import Quaternion
 
-from . import common
 from .. import utils
+from . import common
 
 def buildTree(pointCloud):
     # returns a KD tree for a point cloud input
     # builds from scratch every call
-    n = len(pointCloud.points)
-    flatPos = [0.0] * (n*3)
-    pointCloud.attributes["position"].data.foreach_get("vector",flatPos)
-
-    tree = KDTree(n)
-    for i in range(n):
-        tree.insert(flatPos[(i*3):(i*3)+3],i)
+    positions = common.readPositions(pointCloud)
+    tree = KDTree(len(positions))
+    for i, p in enumerate(positions):
+        tree.insert(p, i)
     tree.balance()
     return tree
 
@@ -46,22 +43,10 @@ def selectPoint(pointCloud, index, extend=False):
     pointCloud.update_tag()
 
 def getHitType(obj):
-    # prototypes are named with a 5 digit type prefix, e.g. "00005"
+    # the brick type of a hit instance, from its prototype's name
     if obj is None:
         return None
-    try:
-        return int(obj.original.name[:5])
-    except ValueError:
-        return None
-
-def readAttr(pointCloud, name, width):
-    attr = pointCloud.attributes.get(name)
-    if attr is None:
-        return None
-    vals = [0] * (len(pointCloud.points) * width)
-    key = "value"
-    attr.data.foreach_get(key, vals)
-    return vals
+    return common.typeFromName(obj.original.name)
 
 def pickPoint(context, mousePos):
     region = context.region
@@ -96,30 +81,29 @@ def pickPoint(context, mousePos):
             continue
 
         # narrow by brick type
-        types = readAttr(pc, "type", 1)
-        if types is not None and hitType is not None:
+        if hitType is not None:
+            types = common.readTypes(pc)
             byType = [i for i in candidates if types[i] == hitType]
             candidates = byType or candidates
 
         # narrow by rotation (q and -q are the same rotation, hence abs)
-        rots = readAttr(pc, "rotation", 4)
-        if rots is not None and len(candidates) > 1:
-            byRot = [i for i in candidates
-                     if abs(Quaternion(rots[i*4:i*4+4]).dot(hitRot)) > 0.9999]
+        if len(candidates) > 1:
+            rots = common.readRotations(pc)
+            byRot = [i for i in candidates if abs(Quaternion(rots[i]).dot(hitRot)) > 0.9999]
             candidates = byRot or candidates
 
         # still tied = genuinely identical duplicates; cycle through them
         if len(candidates) > 1:
-            sel = readAttr(pc, ".selection", 1)
-            if sel is not None:
-                selected = [i for i in candidates if sel[i]]
-                if selected:
-                    last = candidates.index(selected[-1])
-                    return pcObj, candidates[(last + 1) % len(candidates)]
+            sel = common.readSelection(pc)
+            selected = [i for i in candidates if sel[i]]
+            if selected:
+                last = candidates.index(selected[-1])
+                return pcObj, candidates[(last + 1) % len(candidates)]
 
         return pcObj, candidates[0]
 
     return None
+
 def raycastAndSelect(context, mousePos, extend=False):
     # select the point if in edit mode, return True
     # if no lego is hit, return False
@@ -143,15 +127,8 @@ class LEGO_OT_SelectInstance(bpy.types.Operator):
     location: IntVectorProperty(name="Location",description="Mouse location in region coordinates, internal",size=2,default=(0, 0),options={'HIDDEN', 'SKIP_SAVE'},)
 
     @classmethod
-    def poll(self,context):
-        # only hijack clicks in point cloud edit mode, in the 3D viewport,
-        # when at least one lego cloud is being edited. Returning False lets
-        # the keymap fall through to Blender's normal select.
-        if context.mode != 'EDIT_POINTCLOUD':
-            return False
-        if context.area is None or context.area.type != 'VIEW_3D':
-            return False
-        return any(isLegoPointCloud(o) for o in context.objects_in_mode)
+    def poll(cls, context):
+        return common.pollLegoEdit(context)  # otherwise the click falls through to Blender's select
 
     def invoke(self, context, event):
         mousePos = (event.mouse_region_x, event.mouse_region_y)
@@ -161,35 +138,19 @@ class LEGO_OT_SelectInstance(bpy.types.Operator):
         # nothing hit: let the click go on to the default select operator
         return {'PASS_THROUGH'}
 
-# Keymap \/
- 
-addon_keymaps = []
- 
-def registerKeymap():
-    kc = bpy.context.window_manager.keyconfigs.addon
-    if kc is None:  # background mode
-        return
- 
-    # point cloud edit mode keymap; mode keymaps run before the generic "3D View" one
-    km = kc.keymaps.new(name="Point Cloud", space_type='EMPTY')
- 
-    kmi = km.keymap_items.new(LEGO_OT_SelectInstance.bl_idname, 'LEFTMOUSE', 'CLICK')
-    kmi.properties.extend = False
-    addon_keymaps.append((km, kmi))
- 
-    kmi = km.keymap_items.new(LEGO_OT_SelectInstance.bl_idname, 'LEFTMOUSE', 'CLICK', shift=True)
-    kmi.properties.extend = True
-    addon_keymaps.append((km, kmi))
- 
-def unregisterKeymap():
-    for km, kmi in addon_keymaps:
-        km.keymap_items.remove(kmi)
-    addon_keymaps.clear()
- 
+# Registration \/
+
+keymaps = common.Keymaps()
+
 def register():
     bpy.utils.register_class(LEGO_OT_SelectInstance)
-    registerKeymap()
- 
+    kmi = keymaps.add(LEGO_OT_SelectInstance.bl_idname, 'LEFTMOUSE', 'CLICK')
+    if kmi is not None:
+        kmi.properties.extend = False
+    kmi = keymaps.add(LEGO_OT_SelectInstance.bl_idname, 'LEFTMOUSE', 'CLICK', shift=True)
+    if kmi is not None:
+        kmi.properties.extend = True
+
 def unregister():
-    unregisterKeymap()
+    keymaps.clear()
     bpy.utils.unregister_class(LEGO_OT_SelectInstance)

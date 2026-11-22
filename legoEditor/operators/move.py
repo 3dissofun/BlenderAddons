@@ -1,9 +1,7 @@
 """
 The intent of this file is to provide an override to the move operator (G) when in a lego point cloud.
 
-Point positions are stored in LDU in the cloud's local space, and the object's matrix (with its
-scale) places them:
-    brick world matrix = object matrix @ T(position) @ R(rotation) @ prototype matrix
+Point positions and the brick transform maths are described in common.py.
 
 Snapping modes (scene.lego_snap_mode, read when G is pressed):
     GRID   round the move to Grid Size LDU in the cloud's local space, so one step in the world
@@ -33,94 +31,13 @@ from mathutils.geometry import intersect_line_line, intersect_line_plane
 
 from .. import utils
 from ..ldraw.importer import snapReader
-from ..tools import snapmatch
-from . import common
+from . import common, snapmatch
 
-AXIS_KEYS = {'X': 0, 'Y': 1, 'Z': 2}
-AXIS_VECTORS = (Vector((1, 0, 0)), Vector((0, 1, 0)), Vector((0, 0, 1)))
-NAV_EVENTS = {'WHEELUPMOUSE', 'WHEELDOWNMOUSE', 'TRACKPADPAN', 'TRACKPADZOOM'}
-
-# Point cloud attributes \/
-
-def readPositions(pc):
-    n = len(pc.points)
-    flat = np.empty(n * 3, dtype=np.float32)
-    pc.attributes["position"].data.foreach_get("vector", flat)
-    return flat.reshape(n, 3)
-
-def writePositions(pc, positions):
-    pc.attributes["position"].data.foreach_set("vector", positions.astype(np.float32).ravel())
-    pc.update_tag()
-
-def readRotations(pc):
-    # (n, 4) w x y z; points without a rotation attribute are unrotated
-    n = len(pc.points)
-    attr = pc.attributes.get("rotation")
-    if attr is None:
-        out = np.zeros((n, 4), dtype=np.float32)
-        out[:, 0] = 1.0
-        return out
-    flat = np.empty(n * 4, dtype=np.float32)
-    attr.data.foreach_get("value", flat)
-    return flat.reshape(n, 4)
-
-def writeRotations(pc, quats):
-    attr = pc.attributes.get("rotation")
-    if attr is None:
-        attr = pc.attributes.new("rotation", 'QUATERNION', 'POINT')
-    attr.data.foreach_set("value", quats.astype(np.float32).ravel())
-    pc.update_tag()
-
-def readTypes(pc):
-    n = len(pc.points)
-    attr = pc.attributes.get("type")
-    vals = np.zeros(n, dtype=np.int32)
-    if attr is not None:
-        attr.data.foreach_get("value", vals)
-    return vals
-
-def readSelection(pc):
-    # Blender treats a missing .selection attribute as "everything selected"
-    n = len(pc.points)
-    attr = pc.attributes.get(".selection")
-    if attr is None:
-        return np.ones(n, dtype=bool)
-    if attr.data_type == 'BOOLEAN':
-        vals = np.zeros(n, dtype=bool)
-        attr.data.foreach_get("value", vals)
-        return vals
-    vals = np.zeros(n, dtype=np.float32)
-    attr.data.foreach_get("value", vals)
-    return vals > 0.5
-
-# Maths \/
-
-def quatsToMatrices(quats):
-    # (n, 4) w x y z -> (n, 3, 3)
-    q = np.asarray(quats, dtype=np.float64)
-    q = q / np.maximum(np.linalg.norm(q, axis=1, keepdims=True), 1e-12)
-    w, x, y, z = q.T
-    return np.stack([
-        np.stack([1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)], -1),
-        np.stack([2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)], -1),
-        np.stack([2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)], -1),
-    ], 1)
-
-def instanceWorlds(objMatrix, positions, quats):
-    # world matrix of each instanced brick, before its prototype's own matrix (see top of file)
-    n = len(positions)
-    local = np.zeros((n, 4, 4))
-    local[:, :3, :3] = quatsToMatrices(quats)
-    local[:, :3, 3] = np.asarray(positions, dtype=np.float64)
-    local[:, 3, 3] = 1.0
-    return objMatrix @ local
+# Snapping \/
 
 def snapStep(mode, gridSize):
     # the grid step for a mode, or None for no grid. BRICK uses the grid when nothing snaps
     return None if mode == 'NONE' else gridSize
-
-def snapToGrid(values, step):
-    return np.round(values / step) * step
 
 # Brick snap data \/
 
@@ -135,10 +52,9 @@ def getPrototypes(obj):
     for child in coll.objects:  # prototypes are named with their type, e.g. "00005"
         if child.type != 'MESH':
             continue
-        try:
-            protos[int(child.name[:5])] = (child.data, np.array(child.matrix_world, dtype=np.float64))
-        except ValueError:
-            continue
+        t = common.typeFromName(child.name)
+        if t is not None:
+            protos[t] = (child.data, np.array(child.matrix_world, dtype=np.float64))
 
     meshes = [m for m, _ in protos.values() if m.as_pointer() not in _snapsTried]
     if meshes:
@@ -156,7 +72,7 @@ def snapInstances(obj, indices, protos, positions, quats, types):
     indices = [int(i) for i in indices if int(types[i]) in protos]
     if not indices:
         return []
-    worlds = instanceWorlds(np.array(obj.matrix_world, dtype=np.float64),
+    worlds = common.instanceWorlds(np.array(obj.matrix_world, dtype=np.float64),
                             positions[indices], quats[indices])
     out = []
     for i, world in zip(indices, worlds):
@@ -219,7 +135,7 @@ def buildSnapper(context, clouds):
 
     for ci, cloud in enumerate(clouds):
         protos = getPrototypes(cloud.obj)
-        types = readTypes(cloud.pc)
+        types = common.readTypes(cloud.pc)
         args = (protos, cloud.orig, cloud.origRot, types)
         for i, mesh, world in snapInstances(cloud.obj, np.flatnonzero(cloud.mask), *args):
             moving.append(((ci, i), mesh, world))
@@ -233,77 +149,11 @@ def buildSnapper(context, clouds):
             pc = obj.data
             static += [(m, w) for _, m, w in snapInstances(
                 obj, range(len(pc.points)), getPrototypes(obj),
-                readPositions(pc), readRotations(pc), readTypes(pc))]
+                common.readPositions(pc), common.readRotations(pc), common.readTypes(pc))]
         elif snapmatch.hasSnaps(obj):
             static.append((obj.data, np.array(obj.matrix_world, dtype=np.float64)))
 
     return PointSnapper(moving, static), base
-
-# Moving clouds \/
-
-class CloudMove:
-    # The state of one point cloud being moved: its original positions and rotations, which
-    # points move, and how to turn a world space move into an LDU move in its local space
-    def __init__(self, obj):
-        self.obj = obj
-        self.pc = obj.data
-        self.orig = readPositions(self.pc)
-        self.origRot = readRotations(self.pc)
-        self.mask = readSelection(self.pc)
-        self.matrix = np.array(obj.matrix_world, dtype=np.float64)
-        # a direction, so no translation: undo the object's rotation and scale
-        self.worldToLdu = obj.matrix_world.inverted_safe().to_3x3()
-        self.anchor = self.orig[self.mask][0].astype(np.float64) if self.mask.any() else None
-        self.tilted = False  # rotations currently differ from origRot
-
-    def worldPoints(self):
-        # world space positions of the selected points, as drawn by the instancer
-        mat = self.obj.matrix_world
-        return [mat @ Vector(p) for p in self.orig[self.mask]]
-
-    def lduDelta(self, worldDelta, step=None, absolute=False):
-        delta = np.array(self.worldToLdu @ worldDelta, dtype=np.float64)
-        if step is None:
-            return delta
-        if absolute:
-            # put the first selected brick on the grid, the rest keep their offsets to it
-            return snapToGrid(self.anchor + delta, step) - self.anchor
-        # snap the distance moved, so bricks already off grid stay as they were relative to it
-        return snapToGrid(delta, step)
-
-    def apply(self, lduDelta):
-        positions = self.orig.copy()
-        positions[self.mask] += lduDelta.astype(np.float32)
-        writePositions(self.pc, positions)
-        if self.tilted:  # coming off a brick snap that tilted the bricks
-            writeRotations(self.pc, self.origRot)
-            self.tilted = False
-
-    def applySnap(self, snap):
-        # snap: world 4x4 to left-multiply onto each moving brick's world matrix.
-        # In the cloud's local space that's A = M^-1 @ snap @ M, applied to T(p) @ R
-        A = np.linalg.inv(self.matrix) @ np.asarray(snap, dtype=np.float64) @ self.matrix
-        rot, move = A[:3, :3], A[:3, 3]
-        sel = self.mask
-
-        positions = self.orig.astype(np.float64)
-        positions[sel] = positions[sel] @ rot.T + move
-        writePositions(self.pc, positions)
-
-        quats = self.origRot.copy()
-        quats[sel] = utils.matricesToQuaternions(rot @ quatsToMatrices(self.origRot[sel]))
-        writeRotations(self.pc, quats)
-        self.tilted = True
-
-    def restore(self):
-        writePositions(self.pc, self.orig)
-        writeRotations(self.pc, self.origRot)
-
-
-def gatherClouds(context):
-    clouds = [CloudMove(o) for o in context.objects_in_mode
-              if common.isLegoPointCloud(o) and len(o.data.points) > 0]
-    return [c for c in clouds if c.mask.any()]
 
 # Operator itself \/
 
@@ -328,13 +178,7 @@ class LEGO_OT_MoveInstance(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        # same rules as select: only in point cloud edit mode, in the 3D viewport,
-        # with a lego cloud being edited. Otherwise G falls through to Blender's move.
-        if context.mode != 'EDIT_POINTCLOUD':
-            return False
-        if context.area is None or context.area.type != 'VIEW_3D':
-            return False
-        return any(common.isLegoPointCloud(o) for o in context.objects_in_mode)
+        return common.pollLegoEdit(context)  # otherwise G falls through to Blender's move
 
     # mouse maths \/
 
@@ -356,12 +200,12 @@ class LEGO_OT_MoveInstance(bpy.types.Operator):
             hit = self.mouseOnViewPlane(context, event)
         elif len(self.axes) == 1:
             # closest point on the axis line to the mouse ray
-            axis = AXIS_VECTORS[self.axes[0]]
+            axis = Vector(((1, 0, 0), (0, 1, 0), (0, 0, 1))[self.axes[0]])
             result = intersect_line_line(origin, far, self.pivot, self.pivot + axis)
             hit = result[1] if result else None
         else:
             # mouse ray onto the plane through the pivot, normal = the excluded axis
-            normal = AXIS_VECTORS[({0, 1, 2} - set(self.axes)).pop()]
+            normal = Vector(((1, 0, 0), (0, 1, 0), (0, 0, 1))[({0, 1, 2} - set(self.axes)).pop()])
             hit = intersect_line_plane(origin, far, self.pivot, normal)
 
         if hit is None:  # ray parallel to the axis/plane: keep the last move
@@ -369,7 +213,7 @@ class LEGO_OT_MoveInstance(bpy.types.Operator):
 
         delta = hit - self.grabStart
         if self.axes is not None:
-            delta = sum((AXIS_VECTORS[a] * delta[a] for a in self.axes), Vector())
+            delta = Vector([delta[a] if a in self.axes else 0.0 for a in range(3)])
         return delta
 
     # snapping \/
@@ -385,7 +229,7 @@ class LEGO_OT_MoveInstance(bpy.types.Operator):
         # Returns the first cloud's LDU move for the header, or None when brick snapped
         if snap is not None:
             for cloud in clouds:
-                cloud.applySnap(snap)
+                cloud.applyTransform(snap)
             return None
         step = snapStep(mode, self.grid)
         lduDeltas = [c.lduDelta(delta, step, self.absolute) for c in clouds]
@@ -396,7 +240,7 @@ class LEGO_OT_MoveInstance(bpy.types.Operator):
     # modal \/
 
     def invoke(self, context, event):
-        self.clouds = gatherClouds(context)
+        self.clouds = common.gatherClouds(context)
         if not self.clouds:
             return {'PASS_THROUGH'}  # nothing selected: let Blender's G deal with it
 
@@ -407,8 +251,7 @@ class LEGO_OT_MoveInstance(bpy.types.Operator):
             self.grid = scene.lego_grid_size
         self.snapper = None
 
-        points = [p for c in self.clouds for p in c.worldPoints()]
-        self.pivot = sum(points, Vector()) / len(points)
+        self.pivot = common.selectionCentre(self.clouds)
         self.grabStart = self.mouseOnViewPlane(context, event)
         self.axes = None
         self.lastDelta = Vector()
@@ -447,40 +290,36 @@ class LEGO_OT_MoveInstance(bpy.types.Operator):
         context.area.tag_redraw()
 
     def setAxis(self, event):
-        axis = AXIS_KEYS[event.type]
+        axis = 'XYZ'.index(event.type)
         newAxes = tuple(a for a in (0, 1, 2) if a != axis) if event.shift else (axis,)
         self.axes = None if self.axes == newAxes else newAxes  # pressing again unlocks
 
-    def finish(self, context):
-        context.area.header_text_set(None)
-        context.area.tag_redraw()
-
     def modal(self, context, event):
-        if event.type in NAV_EVENTS:
+        if event.type in {'WHEELUPMOUSE', 'WHEELDOWNMOUSE', 'TRACKPADPAN', 'TRACKPADZOOM'}:
             return {'PASS_THROUGH'}  # allow zooming while moving
 
         if event.type in {'MOUSEMOVE', 'INBETWEEN_MOUSEMOVE', 'LEFT_CTRL', 'RIGHT_CTRL'}:
             self.update(context, event)
 
-        elif event.type in AXIS_KEYS and event.value == 'PRESS':
+        elif event.type in {'X', 'Y', 'Z'} and event.value == 'PRESS':
             self.setAxis(event)
             self.update(context, event)
 
         elif event.type in {'LEFTMOUSE', 'RET', 'NUMPAD_ENTER', 'SPACE'} and event.value == 'PRESS':
-            self.finish(context)
+            common.clearHeader(context)
             return {'FINISHED'}
 
         elif event.type in {'RIGHTMOUSE', 'ESC'} and event.value == 'PRESS':
             for cloud in self.clouds:
                 cloud.restore()
-            self.finish(context)
+            common.clearHeader(context)
             return {'CANCELLED'}
 
         return {'RUNNING_MODAL'}
 
     def execute(self, context):
         # used by the redo panel (F9 / bottom left): repeats the move from the stored values.
-        clouds = gatherClouds(context)
+        clouds = common.gatherClouds(context)
         if not clouds:
             return {'CANCELLED'}
         snap = None
@@ -514,31 +353,16 @@ def drawSnapHeader(self, context):
     sub.active = scene.lego_snap_mode != 'NONE'  # greyed out, but still editable, when unused
     sub.prop(scene, "lego_grid_size", text="Grid")
 
-# Keymap \/
+# Registration \/
 
-addon_keymaps = []
-
-def registerKeymap():
-    kc = bpy.context.window_manager.keyconfigs.addon
-    if kc is None:  # background mode
-        return
-
-    # point cloud edit mode keymap; mode keymaps run before the generic "3D View" one
-    km = kc.keymaps.new(name="Point Cloud", space_type='EMPTY')
-    kmi = km.keymap_items.new(LEGO_OT_MoveInstance.bl_idname, 'G', 'PRESS')
-    addon_keymaps.append((km, kmi))
-
-def unregisterKeymap():
-    for km, kmi in addon_keymaps:
-        km.keymap_items.remove(kmi)
-    addon_keymaps.clear()
+keymaps = common.Keymaps()
 
 def register():
     bpy.utils.register_class(LEGO_OT_MoveInstance)
     bpy.types.VIEW3D_HT_header.append(drawSnapHeader)
-    registerKeymap()
+    keymaps.add(LEGO_OT_MoveInstance.bl_idname, 'G', 'PRESS')
 
 def unregister():
-    unregisterKeymap()
+    keymaps.clear()
     bpy.types.VIEW3D_HT_header.remove(drawSnapHeader)
     bpy.utils.unregister_class(LEGO_OT_MoveInstance)
