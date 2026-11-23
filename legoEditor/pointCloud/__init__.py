@@ -1,7 +1,11 @@
-from . import selectionOverlay
+from . import selectionOverlay, colorOverlay
+
+modules = [selectionOverlay,]
 
 def register():
-    selectionOverlay.register()
+    for m in modules:
+        m.register()
 
 def unregister():
-    selectionOverlay.unregister()
+    for m in reversed(modules):
+        m.unregister()
