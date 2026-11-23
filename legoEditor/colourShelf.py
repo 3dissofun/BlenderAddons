@@ -63,19 +63,7 @@ class LEGO_AST_colour_shelf(bpy.types.AssetShelf):
         return (asset.id_type == 'OBJECT' and meta is not None
                 and meta.description.startswith(DESC_PREFIX))
 
-class LEGO_PT_colour(bpy.types.Panel):
-    bl_label = "Colours"
-    bl_space_type = 'VIEW_3D'
-    bl_region_type = 'UI'
-    bl_category = panelName
-
-    def draw(self, context):
-        code = context.scene.lego_active_col
-        entry = (colors.getColMap() or {}).get(str(code))
-        name = entry["name"].replace("_", " ") if entry else "Unknown"
-        self.layout.label(text=f"Active: {name} ({code})")
-
-classes = (LEGO_OT_pick_colour, LEGO_AST_colour_shelf, LEGO_PT_colour)
+classes = (LEGO_OT_pick_colour, LEGO_AST_colour_shelf)
 
 def register():
     for cls in classes:

@@ -95,9 +95,9 @@ def getBrickMesh(brickId):
     # first checks the binary blobs, if that doesnt exist, checks the .dat files
     # if the brick cannot be found, None is returned
 
-    blobMesh = blobReader.buildMesh(brickId)
-    if blobMesh:
-        return blobMesh
-    
-    # fallback option for custom parts etc
+    if not (library.getOverlay() and (library.getOverlay() / library._normalise(brickId)).is_file()):
+        blobMesh = blobReader.buildMesh(brickId)
+        if blobMesh:
+            return blobMesh
+
     return brickMaker.makeBrickMesh(brickId)

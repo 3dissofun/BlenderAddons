@@ -55,7 +55,8 @@ class LEGO_OT_ImportRandom(bpy.types.Operator):
         brickIds = library.getAllParts()       
         brickId = random.choice(brickIds)
         
-        success = points.importAsPoint(brickId)
+        sf = utils.getPref("scaleFactor")
+        success = points.importAsPoint(brickId,scale=sf)
         if success:
             duration = round(time.perf_counter() - start,4)*1000
             self.report({'INFO'},f"Brick built in {duration}ms")
@@ -78,7 +79,8 @@ class LEGO_OT_ImportBrick(bpy.types.Operator):
             self.report({'WARNING'},"Please provide a brick ID")
             return {'CANCELLED'}
 
-        success = points.importAsPoint(brickId)
+        sf = utils.getPref("scaleFactor")
+        success = points.importAsPoint(brickId,scale=sf)
         if success:
             duration = round(time.perf_counter() - start,4)*1000
             self.report({'INFO'},f"Brick built in {duration}ms")

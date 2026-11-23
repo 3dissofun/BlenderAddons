@@ -2,6 +2,17 @@ import bpy
 
 panelName = "LEGO"
 
+class LEGO_PT_LegoDebugPanel(bpy.types.Panel):
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = panelName
+    bl_label = "Debug"
+
+    def draw(self,context):
+        layout = self.layout
+        layout.operator("lego.import_random")
+        layout.operator("lego.build_snaps")
+
 class LEGO_PT_LegoPanel(bpy.types.Panel):
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
@@ -12,8 +23,6 @@ class LEGO_PT_LegoPanel(bpy.types.Panel):
         layout = self.layout
         layout.operator("lego.import_random")
         layout.operator("lego.build_snaps")
-        layout.prop(context.scene,"lego_active_col")
-        layout.operator("lego.set_colour")
 
         obj = context.active_object
         if obj and obj.is_lego_model:

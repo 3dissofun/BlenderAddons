@@ -3,7 +3,7 @@ schema_version = "1.0.0"
 id = "lego_editor"
 version = "1.0.0"
 name = "Lego Editor"
-tagline = "Set of tools for importing, snapping, shading and rendering lego in blender :)"
+tagline = "Set of tools for lego in blender :)"
 maintainer = "Joshua Palfrey"
 type = "add-on"
 # tags = ["Animation", "Sequencer"]
@@ -13,7 +13,7 @@ license = ["SPDX:GPL-3.0-or-later",]
 
 platforms = ["windows-x64",]
 # # platforms = ["windows-x64", "macos-arm64", "linux-x64"]
-wheels = ["nodebpy-530.0.3-py3-none-any.whl",]
+wheels = ["./wheels/nodebpy-530.0.3-py3-none-any.whl",]
 files = "Import LDraw files from disk"
 
 # # Optional: link to documentation, support (public bug tracker), source files, etc.

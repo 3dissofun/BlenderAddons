@@ -10,6 +10,8 @@ hopefully that makes some sense :)
 import bpy
 
 import numpy as np
+from mathutils import Matrix
+from math import radians
 
 from ..ldraw.importer import importer
 from .. import utils
@@ -159,10 +161,9 @@ def getNewProtoColl(protoCollName):
     protoColl = bpy.data.collections.new(protoCollName)
     protoColl.hide_viewport = True
     protoColl.hide_render = True
-    bpy.context.scene.collection.children.link(protoColl)
     return protoColl
 
-def importAsPoint(brickId, model="misc"):
+def importAsPoint(brickId, model="misc", scale=1.0):
     # method to create or extend the current models point cloud
     if not brickId.lower().endswith(".dat"):
         brickId = brickId + ".dat"
@@ -182,10 +183,11 @@ def importAsPoint(brickId, model="misc"):
     # get the point cloud
     currentPc = bpy.data.objects.get(model,None)
     if (currentPc is None) or (currentPc.type != 'POINTCLOUD'):
-        pcObj, modifier = getNewPc(model)
+        pcObj, modifier = getNewPc(model,protoColl=protoColl)
+        # LDraw is -Y up, Blender is Z up
+        pcObj.matrix_basis = Matrix.Rotation(radians(-90), 4, 'X') @ Matrix.Scale(scale, 4)
         pc = pcObj.data
         bpy.context.scene.collection.objects.link(pcObj)
-        utils.setModifierInput(modifier, "Collection", protoColl)
     else:
         pcObj = currentPc
         pc = pcObj.data

@@ -26,7 +26,7 @@ import numpy as np
 
 HERE = Path(__file__).resolve().parent
 COLMAP_FILE = HERE.parent / "ldraw" / "col" / "colMap.json"
-LIBRARY_DIR = HERE / "colourLibrary"
+LIBRARY_DIR = HERE 
 LIBRARY_FILE = LIBRARY_DIR / "ldrawColours.blend"
 
 DESC_PREFIX = "ldraw_colour:"
